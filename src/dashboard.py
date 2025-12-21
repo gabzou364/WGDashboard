@@ -526,6 +526,30 @@ def API_getWireguardConfigurationRealtimeTraffic():
         return ResponseObject(False, "Configuration does not exist", status_code=404)
     return ResponseObject(data=WireguardConfigurations[configurationName].getRealtimeTrafficUsage())
 
+@app.get(f'{APP_PREFIX}/api/getPeerTraffic')
+def API_getPeerTraffic():
+    id = request.args.get('id')
+    if id is None:
+        return ResponseObject(False, "Missing parameter: id", status_code=400)
+    
+    # Search for the peer across all configurations
+    for configName, config in WireguardConfigurations.items():
+        found, peer = config.searchPeer(id)
+        if found:
+            total_traffic = peer.total_receive + peer.total_sent + peer.cumu_receive + peer.cumu_sent
+            return ResponseObject(data={
+                "id": peer.id,
+                "name": peer.name,
+                "total_receive": peer.total_receive,
+                "total_sent": peer.total_sent,
+                "cumu_receive": peer.cumu_receive,
+                "cumu_sent": peer.cumu_sent,
+                "total_traffic": total_traffic,
+                "configuration": configName
+            })
+    
+    return ResponseObject(False, "Peer not found", status_code=404)
+
 @app.get(f'{APP_PREFIX}/api/getWireguardConfigurationBackup')
 def API_getWireguardConfigurationBackup():
     configurationName = request.args.get('configurationName')
