@@ -1231,6 +1231,82 @@ def API_getPeerScheduleJobLogs(configName):
         requestAll = True
     return ResponseObject(data=AllPeerJobs.getPeerJobLogs(configName))
 
+@app.post(f'{APP_PREFIX}/api/setPeerExpiryDate')
+def API_setPeerExpiryDate():
+    """
+    Convenient API endpoint to set an expiry date for a peer that will restrict it when reached.
+    
+    Expected JSON payload:
+    {
+        "Configuration": "wg0",
+        "Peer": "<peer_public_key>",
+        "ExpiryDate": "2025-12-31 23:59:59"
+    }
+    """
+    data = request.json
+    
+    # Validate required fields
+    if "Configuration" not in data or "Peer" not in data or "ExpiryDate" not in data:
+        return ResponseObject(False, "Please specify Configuration, Peer, and ExpiryDate")
+    
+    configuration_name = data['Configuration']
+    peer_id = data['Peer']
+    expiry_date = data['ExpiryDate']
+    
+    # Validate configuration exists
+    configuration = WireguardConfigurations.get(configuration_name)
+    if configuration is None:
+        return ResponseObject(False, f"Configuration '{configuration_name}' does not exist")
+    
+    # Validate peer exists
+    f, fp = configuration.searchPeer(peer_id)
+    if not f:
+        return ResponseObject(False, f"Peer '{peer_id}' does not exist in configuration '{configuration_name}'")
+    
+    # Validate date format
+    try:
+        from datetime import datetime
+        parsed_date = datetime.strptime(expiry_date, "%Y-%m-%d %H:%M:%S")
+        # Check if date is in the future
+        if parsed_date <= datetime.now():
+            return ResponseObject(False, "ExpiryDate must be in the future")
+    except ValueError:
+        return ResponseObject(False, "Invalid date format. Expected format: YYYY-MM-DD HH:MM:SS (e.g., 2025-12-31 23:59:59)")
+    
+    # Check if an expiry job already exists for this peer
+    existing_jobs = AllPeerJobs.searchJob(configuration_name, peer_id)
+    expiry_job = None
+    for job in existing_jobs:
+        if job.Field == "date" and job.Action == "restrict":
+            expiry_job = job
+            break
+    
+    # Generate or reuse JobID
+    job_id = str(uuid4()) if expiry_job is None else expiry_job.JobID
+    
+    # Create the job
+    job = PeerJob(
+        JobID=job_id,
+        Configuration=configuration_name,
+        Peer=peer_id,
+        Field="date",
+        Operator="lgt",
+        Value=expiry_date,
+        CreationDate=datetime.now() if expiry_job is None else expiry_job.CreationDate,
+        ExpireDate=None,
+        Action="restrict"
+    )
+    
+    # Save the job
+    s, p = AllPeerJobs.saveJob(job)
+    if s:
+        return ResponseObject(
+            True, 
+            message=f"Expiry date set successfully. Peer will be restricted on {expiry_date}",
+            data=p
+        )
+    return ResponseObject(False, message=p)
+
 '''
 File Download
 '''
