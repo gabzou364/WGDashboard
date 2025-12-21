@@ -71,6 +71,29 @@
   <a href="https://wgdashboard.dev">Official Website</a>
 </h1>
 
+# API Features
+
+## Peer Expiry Date Management
+
+WGDashboard provides a convenient API for setting expiry dates on peers that will automatically restrict them when the date is reached. This is perfect for:
+
+- **Trial Periods**: Give users temporary access that expires automatically
+- **Monthly Subscriptions**: Set expiry dates based on billing cycles
+- **Time-Limited Access**: Control access duration without manual intervention
+
+### Quick Example
+
+```bash
+curl -X POST http://localhost:10086/api/setPeerExpiryDate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Configuration": "wg0",
+    "Peer": "peer_public_key_here",
+    "ExpiryDate": "2025-12-31 23:59:59"
+  }'
+```
+
+For complete API documentation, examples, and advanced usage, see [API_PEER_EXPIRY.md](./API_PEER_EXPIRY.md)
 
 # Screenshots
 <img src="https://wgdashboard-resources.tor1.cdn.digitaloceanspaces.com/Documentation%20Images/sign-in.png" alt=""/>
