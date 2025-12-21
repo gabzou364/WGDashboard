@@ -1265,7 +1265,6 @@ def API_setPeerExpiryDate():
     
     # Validate date format
     try:
-        from datetime import datetime
         parsed_date = datetime.strptime(expiry_date, "%Y-%m-%d %H:%M:%S")
         # Check if date is in the future
         if parsed_date <= datetime.now():

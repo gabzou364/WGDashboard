@@ -3,6 +3,7 @@ Test script for Peer Expiry Date API
 Tests the new /api/setPeerExpiryDate endpoint
 """
 
+import sys
 import json
 from datetime import datetime, timedelta
 
@@ -252,4 +253,4 @@ def main():
 
 if __name__ == "__main__":
     success = main()
-    exit(0 if success else 1)
+    sys.exit(0 if success else 1)
