@@ -36,6 +36,11 @@ class Peer:
         self.keepalive = tableData["keepalive"]
         self.remote_endpoint = tableData["remote_endpoint"]
         self.preshared_key = tableData["preshared_key"]
+        self.node_id = tableData.get("node_id")
+        self.iface = tableData.get("iface")
+        self.handshake_obs = tableData.get("handshake_obs")
+        self.rx_obs = tableData.get("rx_obs")
+        self.tx_obs = tableData.get("tx_obs")
         self.jobs: list[PeerJob] = []
         self.ShareLink: list[PeerShareLink] = []
         self.getJobs()

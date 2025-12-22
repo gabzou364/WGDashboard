@@ -98,6 +98,8 @@ class DashboardConfig:
         self.engine = db.create_engine(ConnectionString('wgdashboard'))
         self.dbMetadata = db.MetaData()
         self.__createAPIKeyTable()
+        self.__createNodesTable()
+        self.__createIPAllocationsTable()
         self.DashboardAPIKeys = self.__getAPIKeys()
         self.APIAccessed = False
         self.SetConfig("Server", "version", DashboardConfig.DashboardVersion)
@@ -130,6 +132,48 @@ class DashboardConfig:
                                               )
                                     )
         self.dbMetadata.create_all(self.engine)
+    
+    def __createNodesTable(self):
+        """Create nodes table for multi-node architecture"""
+        self.nodesTable = db.Table('Nodes', self.dbMetadata,
+                                   db.Column('id', db.String(255), nullable=False, primary_key=True),
+                                   db.Column('name', db.String(255), nullable=False),
+                                   db.Column('agent_url', db.String(512), nullable=False),
+                                   db.Column('auth_type', db.String(50), server_default='hmac'),
+                                   db.Column('secret_encrypted', db.Text),
+                                   db.Column('wg_interface', db.String(50)),
+                                   db.Column('endpoint', db.String(255)),
+                                   db.Column('ip_pool_cidr', db.String(50)),
+                                   db.Column('enabled', db.Boolean, server_default='1'),
+                                   db.Column('weight', db.Integer, server_default='100'),
+                                   db.Column('max_peers', db.Integer, server_default='0'),
+                                   db.Column('last_seen', 
+                                            (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP)),
+                                   db.Column('health_json', db.Text),
+                                   db.Column('created_at',
+                                            (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                            server_default=db.func.now()),
+                                   db.Column('updated_at',
+                                            (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                            server_default=db.func.now(),
+                                            onupdate=db.func.now())
+                                   )
+        self.dbMetadata.create_all(self.engine)
+    
+    def __createIPAllocationsTable(self):
+        """Create IP allocations table for per-node IP tracking"""
+        self.ipAllocationsTable = db.Table('IPAllocations', self.dbMetadata,
+                                          db.Column('id', db.Integer, primary_key=True, autoincrement=True),
+                                          db.Column('node_id', db.String(255), nullable=False),
+                                          db.Column('peer_id', db.String(255), nullable=False),
+                                          db.Column('ip_address', db.String(50), nullable=False),
+                                          db.Column('allocated_at',
+                                                   (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                   server_default=db.func.now()),
+                                          db.UniqueConstraint('node_id', 'ip_address', name='uq_node_ip')
+                                          )
+        self.dbMetadata.create_all(self.engine)
+    
     def __getAPIKeys(self) -> list[DashboardAPIKey]:
         try:
             with self.engine.connect() as conn:

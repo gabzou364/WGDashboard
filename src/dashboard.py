@@ -40,6 +40,7 @@ from modules.DashboardClients import DashboardClients
 from modules.DashboardPlugins import DashboardPlugins
 from modules.DashboardWebHooks import DashboardWebHooks
 from modules.NewConfigurationTemplates import NewConfigurationTemplates
+from modules.NodesManager import NodesManager
 
 class CustomJsonEncoder(DefaultJSONProvider):
     def __init__(self, app):
@@ -119,6 +120,57 @@ def peerJobScheduleBackgroundThread():
             except Exception as e:
                 app.logger.error("Background Thread #2 Error", e)
 
+def nodeHealthPollingBackgroundThread():
+    """Background thread for polling node health and peer stats"""
+    global NodesManager
+    with app.app_context():
+        app.logger.info(f"Background Thread #3 (Node Health) Started")
+        app.logger.info(f"Background Thread #3 PID:" + str(threading.get_native_id()))
+        time.sleep(15)  # Initial delay
+        while True:
+            try:
+                enabled_nodes = NodesManager.getEnabledNodes()
+                
+                for node in enabled_nodes:
+                    try:
+                        # Get agent client
+                        client = NodesManager.getNodeAgentClient(node.id)
+                        if not client:
+                            continue
+                        
+                        # Poll health endpoint
+                        health_success, health_data = client.get_health()
+                        
+                        health_info = {}
+                        if health_success:
+                            health_info['status'] = 'online'
+                            health_info['health'] = health_data if isinstance(health_data, dict) else {}
+                        else:
+                            health_info['status'] = 'offline'
+                            health_info['error'] = health_data
+                        
+                        # Poll WireGuard dump if node is online
+                        if health_success and node.wg_interface:
+                            dump_success, dump_data = client.get_wg_dump(node.wg_interface)
+                            if dump_success:
+                                health_info['wg_dump'] = dump_data if isinstance(dump_data, dict) else {}
+                        
+                        # Update node health in database
+                        NodesManager.updateNodeHealth(node.id, health_info)
+                        
+                    except Exception as e:
+                        app.logger.error(f"Error polling node {node.id}: {e}")
+                        # Mark node as offline on error
+                        NodesManager.updateNodeHealth(node.id, {
+                            'status': 'error',
+                            'error': str(e)
+                        })
+                
+                time.sleep(60)  # Poll every 60 seconds
+            except Exception as e:
+                app.logger.error(f"Node Health Polling Thread Error: {e}")
+                time.sleep(60)
+
 def gunicornConfig():
     _, app_ip = DashboardConfig.GetConfig("Server", "app_ip")
     _, app_port = DashboardConfig.GetConfig("Server", "app_port")
@@ -173,6 +225,8 @@ def startThreads():
     bgThread.start()
     scheduleJobThread = threading.Thread(target=peerJobScheduleBackgroundThread, daemon=True)
     scheduleJobThread.start()
+    nodeHealthThread = threading.Thread(target=nodeHealthPollingBackgroundThread, daemon=True)
+    nodeHealthThread.start()
 
 dictConfig({
     'version': 1,
@@ -201,6 +255,7 @@ with app.app_context():
     DashboardPlugins: DashboardPlugins = DashboardPlugins(app, WireguardConfigurations)
     DashboardWebHooks: DashboardWebHooks = DashboardWebHooks(DashboardConfig)
     NewConfigurationTemplates: NewConfigurationTemplates = NewConfigurationTemplates()
+    NodesManager: NodesManager = NodesManager(DashboardConfig)
     InitWireguardConfigurationsList(startup=True)
     DashboardClients: DashboardClients = DashboardClients(WireguardConfigurations)
     app.register_blueprint(createClientBlueprint(WireguardConfigurations, DashboardConfig, DashboardClients))
@@ -1715,6 +1770,113 @@ def API_WebHooks_GetWebHookSessions():
     
     return ResponseObject(data=DashboardWebHooks.GetWebHookSessions(webHook))
     
+
+'''
+Nodes Management API Routes
+'''
+
+@app.get(f'{APP_PREFIX}/api/nodes')
+def API_GetNodes():
+    """Get all nodes"""
+    try:
+        nodes = NodesManager.getAllNodes()
+        return ResponseObject(data=[node.toJson() for node in nodes])
+    except Exception as e:
+        app.logger.error(f"Error getting nodes: {e}")
+        return ResponseObject(False, "Failed to get nodes")
+
+@app.get(f'{APP_PREFIX}/api/nodes/<node_id>')
+def API_GetNode(node_id):
+    """Get node by ID"""
+    try:
+        node = NodesManager.getNodeById(node_id)
+        if node:
+            return ResponseObject(data=node.toJson())
+        return ResponseObject(False, "Node not found")
+    except Exception as e:
+        app.logger.error(f"Error getting node: {e}")
+        return ResponseObject(False, "Failed to get node")
+
+@app.post(f'{APP_PREFIX}/api/nodes')
+def API_CreateNode():
+    """Create a new node"""
+    try:
+        data = request.get_json()
+        required_fields = ['name', 'agent_url', 'wg_interface']
+        
+        if not all(field in data for field in required_fields):
+            return ResponseObject(False, "Missing required fields: name, agent_url, wg_interface")
+        
+        success, result = NodesManager.createNode(
+            name=data['name'],
+            agent_url=data['agent_url'],
+            wg_interface=data['wg_interface'],
+            endpoint=data.get('endpoint', ''),
+            ip_pool_cidr=data.get('ip_pool_cidr', ''),
+            secret=data.get('secret'),
+            auth_type=data.get('auth_type', 'hmac'),
+            weight=data.get('weight', 100),
+            max_peers=data.get('max_peers', 0),
+            enabled=data.get('enabled', True)
+        )
+        
+        if success:
+            return ResponseObject(True, "Node created successfully", data=result.toJson())
+        return ResponseObject(False, result)
+    except Exception as e:
+        app.logger.error(f"Error creating node: {e}")
+        return ResponseObject(False, "Failed to create node")
+
+@app.put(f'{APP_PREFIX}/api/nodes/<node_id>')
+def API_UpdateNode(node_id):
+    """Update node"""
+    try:
+        data = request.get_json()
+        success, result = NodesManager.updateNode(node_id, data)
+        
+        if success:
+            return ResponseObject(True, "Node updated successfully", data=result.toJson())
+        return ResponseObject(False, result)
+    except Exception as e:
+        app.logger.error(f"Error updating node: {e}")
+        return ResponseObject(False, "Failed to update node")
+
+@app.post(f'{APP_PREFIX}/api/nodes/<node_id>/toggle')
+def API_ToggleNode(node_id):
+    """Enable/disable node"""
+    try:
+        data = request.get_json()
+        enabled = data.get('enabled', True)
+        success, result = NodesManager.toggleNodeEnabled(node_id, enabled)
+        
+        if success:
+            status = "enabled" if enabled else "disabled"
+            return ResponseObject(True, f"Node {status} successfully", data=result.toJson())
+        return ResponseObject(False, result)
+    except Exception as e:
+        app.logger.error(f"Error toggling node: {e}")
+        return ResponseObject(False, "Failed to toggle node")
+
+@app.post(f'{APP_PREFIX}/api/nodes/<node_id>/test')
+def API_TestNodeConnection(node_id):
+    """Test connection to node"""
+    try:
+        success, message = NodesManager.testNodeConnection(node_id)
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error testing node connection: {e}")
+        return ResponseObject(False, "Failed to test connection")
+
+@app.delete(f'{APP_PREFIX}/api/nodes/<node_id>')
+def API_DeleteNode(node_id):
+    """Delete node"""
+    try:
+        success, message = NodesManager.deleteNode(node_id)
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error deleting node: {e}")
+        return ResponseObject(False, "Failed to delete node")
+
 
 '''
 Index Page

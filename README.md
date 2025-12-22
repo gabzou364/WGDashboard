@@ -83,3 +83,35 @@
 <img src="https://wgdashboard-resources.tor1.cdn.digitaloceanspaces.com/Documentation%20Images/add-peers.png" alt="" />
 <img src="https://wgdashboard-resources.tor1.cdn.digitaloceanspaces.com/Documentation%20Images/ping.png" alt=""/>
 <img src="https://wgdashboard-resources.tor1.cdn.digitaloceanspaces.com/Documentation%20Images/traceroute.png" alt=""/>
+
+# Multi-Node Architecture (New!)
+
+WGDashboard now supports managing multiple WireGuard nodes from a single dashboard! This enables you to:
+
+- **Centralized Management**: Control multiple WireGuard nodes from one interface
+- **Load Distribution**: Distribute peers across nodes for scalability
+- **Health Monitoring**: Real-time health checks and peer statistics for each node
+- **Secure Communication**: HMAC-signed requests ensure authenticated and tamper-proof communication
+- **Backward Compatible**: Fully compatible with single-node setups - no breaking changes
+
+## Quick Start
+
+1. **Deploy Node Agents** on your WireGuard servers
+2. **Configure Nodes** in the dashboard
+3. **Monitor Health** and manage peers across all nodes
+
+For detailed setup instructions, see:
+- [Multi-Node Architecture Documentation](docs/MULTI_NODE_ARCHITECTURE.md)
+- [Agent Deployment Guide](docs/AGENT_DEPLOYMENT.md)
+- [Example Agent Implementation](docs/wg-agent-example.py)
+
+## Architecture Overview
+
+```
+Controller (Dashboard)  ←→  Node Agents (WireGuard Servers)
+    - Web UI                  - HMAC Authentication
+    - API Management          - Peer Operations
+    - Health Polling          - Stats Collection
+```
+
+The multi-node architecture uses a controller-agent pattern where the main dashboard manages multiple lightweight agents running on WireGuard nodes. All communication is secured with HMAC-SHA256 signatures.

@@ -106,6 +106,14 @@ const router = createRouter({
 					}
 				},
 				{
+					name: "Nodes",
+					path: 'nodes',
+					component: () => import("@/views/nodes.vue"),
+					meta: {
+						title: "Nodes Management"
+					}
+				},
+				{
 					name: "Clients",
 					path: 'clients',
 					component: () => import("@/views/clients.vue"),
