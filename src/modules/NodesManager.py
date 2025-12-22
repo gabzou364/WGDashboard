@@ -87,7 +87,9 @@ class NodesManager:
                 secret = secrets.token_urlsafe(32)
             
             # Store secret (in production, this should be encrypted)
-            secret_encrypted = secret  # TODO: Implement proper encryption
+            # TODO: Implement proper encryption for secrets at rest
+            # Consider using Fernet (cryptography library) or similar
+            secret_encrypted = secret
             
             with self.engine.begin() as conn:
                 conn.execute(

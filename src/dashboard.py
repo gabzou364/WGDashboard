@@ -122,6 +122,7 @@ def peerJobScheduleBackgroundThread():
 
 def nodeHealthPollingBackgroundThread():
     """Background thread for polling node health and peer stats"""
+    global NodesManager
     with app.app_context():
         app.logger.info(f"Background Thread #3 (Node Health) Started")
         app.logger.info(f"Background Thread #3 PID:" + str(threading.get_native_id()))

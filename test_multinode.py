@@ -65,7 +65,7 @@ def test_node_model():
         node = Node(test_data)
         assert node.id == "test-node-1"
         assert node.name == "Test Node"
-        assert node.enabled == True
+        assert node.enabled is True
         
         json_data = node.toJson()
         assert isinstance(json_data, dict)

@@ -233,9 +233,17 @@ class WGAgentHandler(BaseHTTPRequestHandler):
                 cmd.extend(['allowed-ips', ','.join(allowed_ips)])
             
             if preshared_key:
-                # In production, use a temporary file for preshared key
-                cmd.extend(['preshared-key', '/dev/stdin'])
-                subprocess.run(cmd, input=preshared_key.encode(), check=True)
+                # Use temporary file for preshared key to avoid process exposure
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as psk_file:
+                    psk_file.write(preshared_key)
+                    psk_file_path = psk_file.name
+                
+                try:
+                    cmd.extend(['preshared-key', psk_file_path])
+                    subprocess.run(cmd, check=True)
+                finally:
+                    os.unlink(psk_file_path)
             else:
                 subprocess.run(cmd, check=True)
             
