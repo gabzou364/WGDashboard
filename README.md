@@ -131,6 +131,58 @@ WGDashboard Phase 4 adds critical operational capabilities for production deploy
 
 See [Phase 4 Documentation](docs/PHASE4_MULTINODE.md) for complete feature guide.
 
+## Phase 8 Features (LATEST!)
+
+Phase 8 adds flexible node-to-configuration assignment with automatic peer migration and Cloudflare DNS automation:
+
+- **🔗 Config-Node Assignment**: Assign specific nodes to configurations
+  - Many-to-many relationships between configs and nodes
+  - Mark panel as a node (panel node / is_panel_node)
+  - Per-assignment health tracking
+- **🌐 Cloudflare DNS Automation**: Automatic DNS record management
+  - DNS-only mode (no proxy) for WireGuard compatibility
+  - Round-robin load distribution
+  - Automatic record updates on node changes
+  - Support for IPv4 (A) and IPv6 (AAAA) records
+- **🔄 Automatic Peer Migration**: Seamless peer migration when nodes change
+  - Triggered on node removal
+  - Least-loaded destination selection
+  - Preserves peer configuration
+  - Detailed migration reporting
+- **📝 Audit Logging**: Track all critical system changes
+  - Node assignments and removals
+  - DNS updates
+  - Peer migrations
+  - Queryable via API
+
+See [Phase 8 Implementation Summary](PHASE8_IMPLEMENTATION_SUMMARY.md) for complete details.
+
+### Quick Start: Node Assignment & Cloudflare DNS
+
+```bash
+# 1. Assign nodes to configuration
+curl -X POST http://localhost:10086/api/configs/wg0/nodes \
+  -H "Content-Type: application/json" \
+  -d '{"node_id": "node1"}'
+
+# 2. Create cluster endpoint with Cloudflare DNS
+curl -X POST http://localhost:10086/api/configs/wg0/endpoint-group \
+  -H "Content-Type: application/json" \
+  -d '{
+    "domain": "vpn.example.com",
+    "port": 51820,
+    "cloudflare_zone_id": "your_zone_id",
+    "cloudflare_record_name": "vpn.example.com",
+    "ttl": 60
+  }'
+
+# 3. List nodes for configuration
+curl http://localhost:10086/api/configs/wg0/nodes
+
+# 4. Remove node (triggers automatic peer migration)
+curl -X DELETE http://localhost:10086/api/configs/wg0/nodes/node1
+```
+
 ### Quick Start: Drift Detection
 
 ```bash
@@ -186,15 +238,37 @@ sudo systemctl enable --now wgdashboard-agent
 
 ## Quick Start
 
-1. **Deploy Node Agents** on your WireGuard servers (see below)
-2. **Configure Nodes** in the dashboard
-3. **Create Peers** with automatic node selection and IP allocation
-4. **Monitor Drift** to ensure configuration integrity
+### New to Multi-Node Setup?
+
+1. **[Read the Node Setup Guide](docs/node-setup.md)** - Complete walkthrough for setting up your first node
+2. **[Setup Cloudflare DNS (Optional)](docs/cloudflare-dns-setup.md)** - Enable DNS-based load distribution
+
+### Quick Setup Steps
+
+1. **Deploy Node Agents** on your WireGuard servers
+   - Docker: See [Node Setup Guide - Docker](docs/node-setup.md#a-docker-deployment)
+   - Systemd: See [Node Setup Guide - Systemd](docs/node-setup.md#b-systemd-deployment)
+2. **Register Nodes** in the dashboard
+   - Via Web UI or API: [Node Registration](docs/node-setup.md#step-3-register-node-in-panel)
+3. **Assign Nodes to Configurations**
+   - Link nodes to WireGuard configs: [Node Assignment](docs/node-setup.md#step-4-assign-node-to-configuration)
+4. **Configure Cloudflare DNS (Optional)**
+   - For cluster endpoints: [Cloudflare Setup](docs/cloudflare-dns-setup.md)
+5. **Create Peers** with automatic node selection and IP allocation
+6. **Monitor Drift** to ensure configuration integrity
 
 ## Documentation
 
-- **[Phase 4: Drift Detection & Production Agent](docs/PHASE4_MULTINODE.md)** - NEW! Drift detection, reconciliation, per-node overrides
+### Setup Guides (Start Here!)
+- **[Node Setup Guide](docs/node-setup.md)** - 📘 Complete guide for panel and node server setup
+- **[Cloudflare DNS Setup Guide](docs/cloudflare-dns-setup.md)** - 🌐 DNS-only cluster endpoint configuration
+
+### Phase Documentation
+- **[Phase 8: Node Assignment & DNS Automation](PHASE8_IMPLEMENTATION_SUMMARY.md)** - LATEST! Config-node assignment, peer migration, Cloudflare DNS
+- **[Phase 4: Drift Detection & Production Agent](docs/PHASE4_MULTINODE.md)** - Drift detection, reconciliation, per-node overrides
 - **[Phase 2: Peer Management & IPAM](docs/PHASE2_MULTINODE.md)** - Load balancing and IP allocation
+
+### Architecture & Deployment
 - **[Multi-Node Architecture](docs/MULTI_NODE_ARCHITECTURE.md)** - Overall architecture and security
 - **[Agent Deployment Guide](docs/AGENT_DEPLOYMENT.md)** - Install and configure agents
 - **[Example Agent](docs/wg-agent-example.py)** - Simple reference implementation
