@@ -89,15 +89,44 @@
 WGDashboard now supports managing multiple WireGuard nodes from a single dashboard! This enables you to:
 
 - **Centralized Management**: Control multiple WireGuard nodes from one interface
-- **Load Distribution**: Distribute peers across nodes for scalability
+- **Automatic Load Balancing**: Intelligently distribute peers across nodes based on load and capacity
+- **Panel-Side IP Management**: Allocate IPs from node-specific pools with conflict prevention
+- **Remote Peer Operations**: Create, update, and delete peers on remote nodes via secure agent API
 - **Health Monitoring**: Real-time health checks and peer statistics for each node
 - **Secure Communication**: HMAC-signed requests ensure authenticated and tamper-proof communication
 - **Backward Compatible**: Fully compatible with single-node setups - no breaking changes
+
+## Phase 2 Features (Available Now)
+
+✅ **Node Selection & Load Balancing**
+- Auto-select best node based on current load
+- Manual node selection for specific routing
+- Graceful fallback to local mode
+
+✅ **IP Address Management (IPAM)**
+- Per-node IP pools with CIDR configuration
+- Automatic IP allocation with first-host reservation
+- Conflict detection and retry logic
+
+✅ **Remote Peer Management**
+- Create peers on remote nodes via agent API
+- Delete peers with automatic IP deallocation
+- Transactional safety with rollback on failure
+
+✅ **Enhanced UI**
+- Node selection dropdown in peer creation
+- Node badge display on peer cards
+- Works seamlessly with or without nodes configured
 
 ## Quick Start
 
 1. **Deploy Node Agents** on your WireGuard servers
 2. **Configure Nodes** in the dashboard
+3. **Create Peers** with automatic node selection and IP allocation
+
+For detailed information, see:
+- [Phase 2 Multi-Node Features](docs/PHASE2_MULTINODE.md) - Peer management and IPAM
+- [Multi-Node Architecture Documentation](docs/MULTI_NODE_ARCHITECTURE.md) - Overall architecture
 3. **Monitor Health** and manage peers across all nodes
 
 For detailed setup instructions, see:
