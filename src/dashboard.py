@@ -41,6 +41,8 @@ from modules.DashboardPlugins import DashboardPlugins
 from modules.DashboardWebHooks import DashboardWebHooks
 from modules.NewConfigurationTemplates import NewConfigurationTemplates
 from modules.NodesManager import NodesManager
+from modules.IPAllocationManager import IPAllocationManager
+from modules.NodeSelector import NodeSelector
 
 class CustomJsonEncoder(DefaultJSONProvider):
     def __init__(self, app):
@@ -122,7 +124,7 @@ def peerJobScheduleBackgroundThread():
 
 def nodeHealthPollingBackgroundThread():
     """Background thread for polling node health and peer stats"""
-    global NodesManager
+    global NodesManager, IPAllocManager, NodeSelector
     with app.app_context():
         app.logger.info(f"Background Thread #3 (Node Health) Started")
         app.logger.info(f"Background Thread #3 PID:" + str(threading.get_native_id()))
@@ -256,6 +258,8 @@ with app.app_context():
     DashboardWebHooks: DashboardWebHooks = DashboardWebHooks(DashboardConfig)
     NewConfigurationTemplates: NewConfigurationTemplates = NewConfigurationTemplates()
     NodesManager: NodesManager = NodesManager(DashboardConfig)
+    IPAllocManager: IPAllocationManager = IPAllocationManager(DashboardConfig)
+    NodeSelector: NodeSelector = NodeSelector(NodesManager)
     InitWireguardConfigurationsList(startup=True)
     DashboardClients: DashboardClients = DashboardClients(WireguardConfigurations)
     app.register_blueprint(createClientBlueprint(WireguardConfigurations, DashboardConfig, DashboardClients))
@@ -814,16 +818,63 @@ def API_deletePeers(configName: str) -> ResponseObject:
         if len(peers) == 0:
             return ResponseObject(False, "Please specify one or more peers", status_code=400)
         configuration = WireguardConfigurations.get(configName)
-        status, msg = configuration.deletePeers(peers, AllPeerJobs, AllPeerShareLinks)
+        
+        # Check each peer for node_id and delete via agent if needed
+        for peer_id in peers:
+            found, peer = configuration.searchPeer(peer_id)
+            if found and peer.node_id:
+                # Peer is on a remote node - delete via agent
+                try:
+                    client = NodesManager.getNodeAgentClient(peer.node_id)
+                    if client and peer.iface:
+                        success, response = client.delete_peer(peer.iface, peer_id)
+                        if not success:
+                            app.logger.error(f"Failed to delete peer {peer_id} from node: {response}")
+                            return ResponseObject(False, f"Failed to delete peer from node: {response}")
+                    
+                    # Deallocate IP
+                    IPAllocManager.deallocateIP(peer.node_id, peer_id)
+                    
+                    # Remove from database
+                    with configuration.engine.begin() as conn:
+                        conn.execute(
+                            configuration.peersTable.delete().where(
+                                configuration.peersTable.c.id == peer_id
+                            )
+                        )
+                    
+                    # Delete jobs and share links
+                    for job in peer.jobs:
+                        AllPeerJobs.deleteJob(job)
+                    for shareLink in peer.ShareLink:
+                        AllPeerShareLinks.updateLinkExpireDate(shareLink.ShareID, datetime.now())
+                        
+                except Exception as e:
+                    app.logger.error(f"Error deleting peer {peer_id} from node: {e}")
+                    return ResponseObject(False, f"Error deleting peer from node: {str(e)}")
+        
+        # For local peers, use existing delete logic
+        local_peers = []
+        for peer_id in peers:
+            found, peer = configuration.searchPeer(peer_id)
+            if found and not peer.node_id:
+                local_peers.append(peer_id)
+        
+        if local_peers:
+            status, msg = configuration.deletePeers(local_peers, AllPeerJobs, AllPeerShareLinks)
+            if not status:
+                return ResponseObject(status, msg)
         
         # Delete Assignment
-        
         for p in peers:
             assignments = DashboardClients.DashboardClientsPeerAssignment.GetAssignedClients(configName, p)
             for c in assignments:
                 DashboardClients.DashboardClientsPeerAssignment.UnassignClients(c.AssignmentID)
         
-        return ResponseObject(status, msg)
+        # Refresh peers
+        configuration.getPeers()
+        
+        return ResponseObject(True, f"Deleted {len(peers)} peer(s) successfully")
 
     return ResponseObject(False, "Configuration does not exist", status_code=404)
 
@@ -911,7 +962,26 @@ def API_addPeers(configName):
     if configName in WireguardConfigurations.keys():
         data: dict = request.get_json()
         try:
+            # Multi-node support: node selection
+            node_selection: str = data.get('node_selection', None)  # "auto", specific node_id, or None for local
+            selected_node = None
+            selected_node_id = None
             
+            # If node selection is provided, select a node
+            if node_selection:
+                success, node, message = NodeSelector.selectNode(node_selection)
+                if not success and node is None:
+                    # No nodes available, fallback to legacy local mode
+                    app.logger.info(f"Node selection fallback to local: {message}")
+                    node_selection = None
+                elif not success:
+                    # Selection failed with error
+                    return ResponseObject(False, message)
+                else:
+                    # Node selected successfully
+                    selected_node = node
+                    selected_node_id = node.id
+                    app.logger.info(f"Selected node {node.name} for peer creation")
 
             bulkAdd: bool = data.get("bulkAdd", False)
             bulkAddAmount: int = data.get('bulkAddAmount', 0)
@@ -1011,28 +1081,117 @@ def API_addPeers(configName):
                         # Check if provided pubkey match provided private key
                         if public_key != genPub:
                             return ResponseObject(False, "Provided Public Key does not match provided Private Key")
-                if len(allowed_ips) == 0:
-                    if ipStatus:
-                        for subnet in availableIps.keys():
-                            for ip in availableIps[subnet]:
-                                allowed_ips = [ip]
-                                break
-                            break  
+                
+                # IP allocation logic - different for node vs local
+                if selected_node:
+                    # Allocate IP from node's pool using IPAM
+                    if len(allowed_ips) == 0:
+                        success, ip_or_error = IPAllocManager.allocateIP(selected_node_id, public_key)
+                        if not success:
+                            return ResponseObject(False, f"Failed to allocate IP: {ip_or_error}")
+                        allowed_ips = [ip_or_error]
                     else:
-                        return ResponseObject(False, "No more available IP can assign") 
+                        # User provided IP - validate it's in node's pool
+                        # For now, still allocate to track it
+                        success, _ = IPAllocManager.allocateIP(selected_node_id, public_key)
+                        if not success:
+                            app.logger.warning(f"Failed to track user-provided IP in IPAM")
+                else:
+                    # Legacy local mode - use existing logic
+                    if len(allowed_ips) == 0:
+                        if ipStatus:
+                            for subnet in availableIps.keys():
+                                for ip in availableIps[subnet]:
+                                    allowed_ips = [ip]
+                                    break
+                                break  
+                        else:
+                            return ResponseObject(False, "No more available IP can assign") 
 
-                if allowed_ips_validation:
-                    for i in allowed_ips:
-                        found = False
-                        for subnet in availableIps.keys():
-                            network = ipaddress.ip_network(subnet, False)
-                            ap = ipaddress.ip_network(i)
-                            if network.version == ap.version and ap.subnet_of(network):
-                                found = True
+                    if allowed_ips_validation:
+                        for i in allowed_ips:
+                            found = False
+                            for subnet in availableIps.keys():
+                                network = ipaddress.ip_network(subnet, False)
+                                ap = ipaddress.ip_network(i)
+                                if network.version == ap.version and ap.subnet_of(network):
+                                    found = True
                         
-                        if not found:
-                            return ResponseObject(False, f"This IP is not available: {i}")
+                            if not found:
+                                return ResponseObject(False, f"This IP is not available: {i}")
 
+                # For remote nodes, create peer via agent
+                if selected_node:
+                    # Create peer via node agent
+                    try:
+                        client = NodesManager.getNodeAgentClient(selected_node_id)
+                        if not client:
+                            # Rollback IP allocation
+                            IPAllocManager.deallocateIP(selected_node_id, public_key)
+                            return ResponseObject(False, "Failed to get agent client for node")
+                        
+                        # Prepare peer data for agent
+                        peer_data = {
+                            "public_key": public_key,
+                            "preshared_key": preshared_key if preshared_key else None,
+                            "allowed_ips": ','.join(allowed_ips),
+                            "persistent_keepalive": keep_alive if keep_alive > 0 else None
+                        }
+                        
+                        # Call agent to add peer
+                        success, response = client.add_peer(selected_node.wg_interface, peer_data)
+                        
+                        if not success:
+                            # Rollback IP allocation
+                            IPAllocManager.deallocateIP(selected_node_id, public_key)
+                            return ResponseObject(False, f"Failed to add peer to node: {response}")
+                        
+                        # Store peer in database with node_id and iface
+                        peer_record = {
+                            "id": public_key,
+                            "private_key": private_key,
+                            "DNS": dns_addresses,
+                            "endpoint_allowed_ip": endpoint_allowed_ip,
+                            "name": name,
+                            "total_receive": 0,
+                            "total_sent": 0,
+                            "total_data": 0,
+                            "endpoint": "N/A",
+                            "status": "stopped",
+                            "latest_handshake": "N/A",
+                            "allowed_ip": ','.join(allowed_ips),
+                            "cumu_receive": 0,
+                            "cumu_sent": 0,
+                            "cumu_data": 0,
+                            "mtu": mtu,
+                            "keepalive": keep_alive,
+                            "remote_endpoint": selected_node.endpoint,
+                            "preshared_key": preshared_key,
+                            "node_id": selected_node_id,
+                            "iface": selected_node.wg_interface
+                        }
+                        
+                        with config.engine.begin() as conn:
+                            conn.execute(
+                                config.peersTable.insert().values(peer_record)
+                            )
+                        
+                        # Refresh peers list
+                        config.getPeers()
+                        peerFound, addedPeer = config.searchPeer(public_key)
+                        
+                        if peerFound:
+                            return ResponseObject(status=True, message="Peer created on node successfully", data=[addedPeer])
+                        else:
+                            return ResponseObject(status=True, message="Peer created on node", data=[])
+                            
+                    except Exception as e:
+                        # Rollback IP allocation
+                        IPAllocManager.deallocateIP(selected_node_id, public_key)
+                        app.logger.error(f"Error creating peer on node: {e}")
+                        return ResponseObject(False, f"Error creating peer on node: {str(e)}")
+                
+                # Local peer creation (existing logic)
                 status, addedPeers, message = config.addPeers([
                     {
                         "name": name,
@@ -1784,6 +1943,16 @@ def API_GetNodes():
     except Exception as e:
         app.logger.error(f"Error getting nodes: {e}")
         return ResponseObject(False, "Failed to get nodes")
+
+@app.get(f'{APP_PREFIX}/api/nodes/enabled')
+def API_GetEnabledNodes():
+    """Get only enabled nodes for peer creation UI"""
+    try:
+        nodes = NodesManager.getEnabledNodes()
+        return ResponseObject(data=[node.toJson() for node in nodes])
+    except Exception as e:
+        app.logger.error(f"Error getting enabled nodes: {e}")
+        return ResponseObject(False, "Failed to get enabled nodes")
 
 @app.get(f'{APP_PREFIX}/api/nodes/<node_id>')
 def API_GetNode(node_id):

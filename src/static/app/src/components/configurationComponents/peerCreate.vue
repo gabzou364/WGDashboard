@@ -10,6 +10,7 @@ import PresharedKeyInput from "@/components/configurationComponents/newPeersComp
 import MtuInput from "@/components/configurationComponents/newPeersComponents/mtuInput.vue";
 import PersistentKeepAliveInput
 	from "@/components/configurationComponents/newPeersComponents/persistentKeepAliveInput.vue";
+import NodeSelectionInput from "@/components/configurationComponents/newPeersComponents/nodeSelectionInput.vue";
 import {DashboardConfigurationStore} from "@/stores/DashboardConfigurationStore.js";
 import BulkAdd from "@/components/configurationComponents/newPeersComponents/bulkAdd.vue";
 import LocaleText from "@/components/text/localeText.vue";
@@ -21,6 +22,7 @@ export default {
 		BulkAdd,
 		PersistentKeepAliveInput,
 		MtuInput,
+		NodeSelectionInput,
 		PresharedKeyInput, EndpointAllowedIps, DnsInput, AllowedIPsInput, PrivatePublicKeyInput, NameInput},
 	data(){
 		return{
@@ -38,6 +40,7 @@ export default {
 				preshared_key: "",
 				preshared_key_bulkAdd: false,
 				advanced_security: "off",
+				node_selection: "auto",
 			},
 			availableIp: undefined,
 			availableIpSearchString: "",
@@ -79,8 +82,14 @@ export default {
 					status = false;
 				}
 			}else{
-				let requireFields =
-					["allowed_ips", "private_key", "public_key", "endpoint_allowed_ip", "keepalive", "mtu"]
+				// For node-based peer creation, IP allocation is handled by backend
+				let requireFields = ["private_key", "public_key", "endpoint_allowed_ip", "keepalive", "mtu"];
+				
+				// Only require allowed_ips if not using node selection
+				if (!this.data.node_selection || this.data.node_selection === "") {
+					requireFields.push("allowed_ips");
+				}
+				
 				requireFields.forEach(x => {
 					if (this.data[x].length === 0) status = false;
 				});
@@ -124,6 +133,8 @@ export default {
 		</div>
 		<div class="d-flex flex-column gap-2">
 			<BulkAdd :saving="saving" :data="this.data" :availableIp="this.availableIp"></BulkAdd>
+			<hr class="mb-0 mt-2">
+			<NodeSelectionInput :saving="saving" :data="data"></NodeSelectionInput>
 			<hr class="mb-0 mt-2">
 			<NameInput :saving="saving" :data="this.data" v-if="!this.data.bulkAdd"></NameInput>
 			<PrivatePublicKeyInput :saving="saving" :data="data" v-if="!this.data.bulkAdd"></PrivatePublicKeyInput>

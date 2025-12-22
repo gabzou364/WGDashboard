@@ -101,6 +101,14 @@ export default {
 						<samp>{{Peer.allowed_ip}}</samp>
 					</small>
 				</div>
+				<div v-if="Peer.node_id" :class="{'d-flex gap-2 align-items-center' : dashboardStore.Configuration.Server.dashboard_peer_list_display === 'list'}">
+					<small class="text-muted">
+						<i class="bi bi-hdd-network"></i> <LocaleText t="Node"></LocaleText>
+					</small>
+					<small class="d-block">
+						<span class="badge bg-info text-dark">{{ Peer.node_id }}</span>
+					</small>
+				</div>
 				<div class="d-flex align-items-center gap-1"
 					:class="{'ms-auto': dashboardStore.Configuration.Server.dashboard_peer_list_display === 'list'}"
 				>
