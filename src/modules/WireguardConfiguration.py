@@ -255,6 +255,11 @@ class WireguardConfiguration:
             sqlalchemy.Column('keepalive', sqlalchemy.Integer),
             sqlalchemy.Column('remote_endpoint', sqlalchemy.String(255)),
             sqlalchemy.Column('preshared_key', sqlalchemy.String(255)),
+            sqlalchemy.Column('node_id', sqlalchemy.String(255), nullable=True),
+            sqlalchemy.Column('iface', sqlalchemy.String(50), nullable=True),
+            sqlalchemy.Column('handshake_obs', sqlalchemy.String(255), nullable=True),
+            sqlalchemy.Column('rx_obs', sqlalchemy.Float, nullable=True),
+            sqlalchemy.Column('tx_obs', sqlalchemy.Float, nullable=True),
             extend_existing=True
         )
         self.peersRestrictedTable = sqlalchemy.Table(
@@ -278,6 +283,11 @@ class WireguardConfiguration:
             sqlalchemy.Column('keepalive', sqlalchemy.Integer),
             sqlalchemy.Column('remote_endpoint', sqlalchemy.String(255)),
             sqlalchemy.Column('preshared_key', sqlalchemy.String(255)),
+            sqlalchemy.Column('node_id', sqlalchemy.String(255), nullable=True),
+            sqlalchemy.Column('iface', sqlalchemy.String(50), nullable=True),
+            sqlalchemy.Column('handshake_obs', sqlalchemy.String(255), nullable=True),
+            sqlalchemy.Column('rx_obs', sqlalchemy.Float, nullable=True),
+            sqlalchemy.Column('tx_obs', sqlalchemy.Float, nullable=True),
             extend_existing=True
         )
         self.peersTransferTable = sqlalchemy.Table(
@@ -324,6 +334,8 @@ class WireguardConfiguration:
             sqlalchemy.Column('keepalive', sqlalchemy.Integer),
             sqlalchemy.Column('remote_endpoint', sqlalchemy.String(255)),
             sqlalchemy.Column('preshared_key', sqlalchemy.String(255)),
+            sqlalchemy.Column('node_id', sqlalchemy.String(255), nullable=True),
+            sqlalchemy.Column('iface', sqlalchemy.String(50), nullable=True),
             extend_existing=True
         )
         self.infoTable = sqlalchemy.Table(
