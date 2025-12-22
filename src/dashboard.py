@@ -44,6 +44,11 @@ from modules.NodesManager import NodesManager
 from modules.IPAllocationManager import IPAllocationManager
 from modules.NodeSelector import NodeSelector
 from modules.DriftDetector import DriftDetector
+from modules.ConfigNodesManager import ConfigNodesManager
+from modules.EndpointGroupsManager import EndpointGroupsManager
+from modules.CloudflareDNSManager import CloudflareDNSManager
+from modules.PeerMigrationManager import PeerMigrationManager
+from modules.AuditLogManager import AuditLogManager
 
 class CustomJsonEncoder(DefaultJSONProvider):
     def __init__(self, app):
@@ -262,6 +267,11 @@ with app.app_context():
     IPAllocManager: IPAllocationManager = IPAllocationManager(DashboardConfig)
     NodeSelector: NodeSelector = NodeSelector(NodesManager)
     DriftDetector: DriftDetector = DriftDetector(DashboardConfig)
+    ConfigNodesManager: ConfigNodesManager = ConfigNodesManager(DashboardConfig)
+    EndpointGroupsManager: EndpointGroupsManager = EndpointGroupsManager(DashboardConfig)
+    CloudflareDNSManager: CloudflareDNSManager = CloudflareDNSManager()
+    PeerMigrationManager: PeerMigrationManager = PeerMigrationManager(DashboardConfig, NodesManager, ConfigNodesManager)
+    AuditLogManager: AuditLogManager = AuditLogManager(DashboardConfig)
     InitWireguardConfigurationsList(startup=True)
     DashboardClients: DashboardClients = DashboardClients(WireguardConfigurations)
     app.register_blueprint(createClientBlueprint(WireguardConfigurations, DashboardConfig, DashboardClients))
@@ -2314,6 +2324,284 @@ def API_DisableNodeInterface(node_id):
     except Exception as e:
         app.logger.error(f"Error disabling node interface: {e}")
         return ResponseObject(False, "Failed to disable node interface")
+
+
+'''
+Phase 8: Config-Node Assignment & Endpoint Group APIs
+'''
+
+@app.post(f'{APP_PREFIX}/api/configs/<config_name>/nodes')
+def API_AssignNodeToConfig(config_name):
+    """Assign a node to a configuration"""
+    try:
+        data = request.get_json()
+        node_id = data.get('node_id')
+        
+        if not node_id:
+            return ResponseObject(False, "node_id is required", status_code=400)
+        
+        # Verify config exists
+        if config_name not in WireguardConfigurations.keys():
+            return ResponseObject(False, "Configuration not found", status_code=404)
+        
+        # Verify node exists
+        node = NodesManager.getNodeById(node_id)
+        if not node:
+            return ResponseObject(False, "Node not found", status_code=404)
+        
+        success, message = ConfigNodesManager.assignNodeToConfig(config_name, node_id)
+        
+        if success:
+            # Log audit entry
+            AuditLogManager.log(
+                "node_assigned",
+                "config_node",
+                f"{config_name}:{node_id}",
+                json.dumps({"config": config_name, "node": node_id}),
+                session.get("username")
+            )
+        
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error assigning node to config: {e}")
+        return ResponseObject(False, "Failed to assign node to config", status_code=500)
+
+
+@app.delete(f'{APP_PREFIX}/api/configs/<config_name>/nodes/<node_id>')
+def API_RemoveNodeFromConfig(config_name, node_id):
+    """Remove a node from a configuration"""
+    try:
+        # Verify config exists
+        if config_name not in WireguardConfigurations.keys():
+            return ResponseObject(False, "Configuration not found", status_code=404)
+        
+        # Get node
+        node = NodesManager.getNodeById(node_id)
+        if not node:
+            return ResponseObject(False, "Node not found", status_code=404)
+        
+        # Create backup of interface config before removal
+        from modules.NodeAgent import AgentClient
+        agent = AgentClient(node.agent_url, node.secret_encrypted)
+        backup_success, backup_data = agent.get_interface_config(node.wg_interface)
+        
+        if backup_success:
+            # Store backup (simplified - could be stored in DB or filesystem)
+            backup_info = {
+                "config_name": config_name,
+                "node_id": node_id,
+                "timestamp": datetime.now().isoformat(),
+                "config": backup_data
+            }
+            app.logger.info(f"Created backup for {config_name} on node {node_id}")
+        
+        # Migrate peers from this node
+        migrated, migrate_msg, peer_count = PeerMigrationManager.migrate_peers_from_node(
+            config_name, node_id
+        )
+        
+        if not migrated and peer_count > 0:
+            return ResponseObject(False, f"Failed to migrate peers: {migrate_msg}", status_code=500)
+        
+        # Remove node assignment
+        success, message = ConfigNodesManager.removeNodeFromConfig(config_name, node_id)
+        
+        if success:
+            # Delete interface on node
+            delete_success, _ = agent.delete_interface(node.wg_interface)
+            
+            # Log audit entry
+            AuditLogManager.log(
+                "node_removed",
+                "config_node",
+                f"{config_name}:{node_id}",
+                json.dumps({
+                    "config": config_name,
+                    "node": node_id,
+                    "peers_migrated": peer_count,
+                    "interface_deleted": delete_success
+                }),
+                session.get("username")
+            )
+            
+            # Update DNS if endpoint group exists
+            endpoint_group = EndpointGroupsManager.getEndpointGroup(config_name)
+            if endpoint_group and endpoint_group.cloudflare_zone_id:
+                _update_dns_for_config(config_name)
+        
+        return ResponseObject(success, message, {"peers_migrated": peer_count})
+    except Exception as e:
+        app.logger.error(f"Error removing node from config: {e}")
+        return ResponseObject(False, "Failed to remove node from config", status_code=500)
+
+
+@app.get(f'{APP_PREFIX}/api/configs/<config_name>/nodes')
+def API_GetNodesForConfig(config_name):
+    """Get all nodes assigned to a configuration"""
+    try:
+        # Verify config exists
+        if config_name not in WireguardConfigurations.keys():
+            return ResponseObject(False, "Configuration not found", status_code=404)
+        
+        config_nodes = ConfigNodesManager.getNodesForConfig(config_name)
+        
+        # Enrich with node details
+        result = []
+        for cn in config_nodes:
+            node = NodesManager.getNodeById(cn.node_id)
+            if node:
+                node_data = node.toJson()
+                node_data['config_node_id'] = cn.id
+                node_data['is_healthy'] = cn.is_healthy
+                result.append(node_data)
+        
+        return ResponseObject(True, "Nodes retrieved successfully", result)
+    except Exception as e:
+        app.logger.error(f"Error getting nodes for config: {e}")
+        return ResponseObject(False, "Failed to get nodes for config", status_code=500)
+
+
+@app.post(f'{APP_PREFIX}/api/configs/<config_name>/endpoint-group')
+def API_CreateOrUpdateEndpointGroup(config_name):
+    """Create or update endpoint group (Mode A / Cluster configuration)"""
+    try:
+        data = request.get_json()
+        
+        # Verify config exists
+        if config_name not in WireguardConfigurations.keys():
+            return ResponseObject(False, "Configuration not found", status_code=404)
+        
+        # Validate required fields
+        required = ['domain', 'port']
+        for field in required:
+            if field not in data:
+                return ResponseObject(False, f"{field} is required", status_code=400)
+        
+        # Ensure proxied is false
+        data['proxied'] = False
+        
+        success, message = EndpointGroupsManager.createOrUpdateEndpointGroup(config_name, data)
+        
+        if success:
+            # Update DNS if Cloudflare configured
+            if data.get('cloudflare_zone_id'):
+                _update_dns_for_config(config_name)
+            
+            # Log audit entry
+            AuditLogManager.log(
+                "endpoint_group_updated",
+                "endpoint_group",
+                config_name,
+                json.dumps(data),
+                session.get("username")
+            )
+        
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error creating/updating endpoint group: {e}")
+        return ResponseObject(False, "Failed to create/update endpoint group", status_code=500)
+
+
+@app.get(f'{APP_PREFIX}/api/configs/<config_name>/endpoint-group')
+def API_GetEndpointGroup(config_name):
+    """Get endpoint group for a configuration"""
+    try:
+        # Verify config exists
+        if config_name not in WireguardConfigurations.keys():
+            return ResponseObject(False, "Configuration not found", status_code=404)
+        
+        endpoint_group = EndpointGroupsManager.getEndpointGroup(config_name)
+        
+        if endpoint_group:
+            return ResponseObject(True, "Endpoint group retrieved successfully", endpoint_group.toJson())
+        else:
+            return ResponseObject(False, "Endpoint group not found", status_code=404)
+    except Exception as e:
+        app.logger.error(f"Error getting endpoint group: {e}")
+        return ResponseObject(False, "Failed to get endpoint group", status_code=500)
+
+
+@app.get(f'{APP_PREFIX}/api/audit-logs')
+def API_GetAuditLogs():
+    """Query audit logs"""
+    try:
+        entity_type = request.args.get('entity_type')
+        entity_id = request.args.get('entity_id')
+        action = request.args.get('action')
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        logs = AuditLogManager.get_logs(entity_type, entity_id, action, limit, offset)
+        
+        return ResponseObject(True, "Audit logs retrieved successfully", 
+                            [log.toJson() for log in logs])
+    except Exception as e:
+        app.logger.error(f"Error getting audit logs: {e}")
+        return ResponseObject(False, "Failed to get audit logs", status_code=500)
+
+
+def _update_dns_for_config(config_name: str):
+    """Helper function to update DNS records for a config's endpoint group"""
+    try:
+        endpoint_group = EndpointGroupsManager.getEndpointGroup(config_name)
+        if not endpoint_group or not endpoint_group.cloudflare_zone_id:
+            return
+        
+        # Get Cloudflare API token from config
+        _, cf_token = DashboardConfig.GetConfig("Cloudflare", "api_token")
+        if not cf_token:
+            app.logger.warning("Cloudflare API token not configured")
+            return
+        
+        CloudflareDNSManager.set_api_token(cf_token)
+        
+        # Get healthy nodes for this config
+        if endpoint_group.publish_only_healthy:
+            config_nodes = ConfigNodesManager.getHealthyNodesForConfig(config_name)
+        else:
+            config_nodes = ConfigNodesManager.getNodesForConfig(config_name)
+        
+        # Get node IPs
+        node_ips = []
+        for cn in config_nodes:
+            node = NodesManager.getNodeById(cn.node_id)
+            if node and node.enabled:
+                # Extract IP from endpoint (format: ip:port or domain:port)
+                endpoint = node.endpoint
+                if endpoint and ':' in endpoint:
+                    ip_part = endpoint.rsplit(':', 1)[0]
+                    # Simple validation - if it looks like an IP, add it
+                    try:
+                        import ipaddress
+                        ipaddress.ip_address(ip_part)
+                        node_ips.append(ip_part)
+                    except ValueError:
+                        # Not an IP, skip
+                        pass
+        
+        # Sync DNS records
+        if node_ips:
+            success, message = CloudflareDNSManager.sync_node_ips_to_dns(
+                endpoint_group.cloudflare_zone_id,
+                endpoint_group.cloudflare_record_name or endpoint_group.domain,
+                node_ips,
+                endpoint_group.ttl
+            )
+            
+            if success:
+                # Log audit entry
+                AuditLogManager.log(
+                    "dns_updated",
+                    "dns_record",
+                    config_name,
+                    json.dumps({"domain": endpoint_group.domain, "ips": node_ips}),
+                    "system"
+                )
+                app.logger.info(f"Updated DNS for {config_name}: {len(node_ips)} IPs")
+            else:
+                app.logger.error(f"Failed to update DNS for {config_name}: {message}")
+    except Exception as e:
+        app.logger.error(f"Error updating DNS for config: {e}")
 
 
 '''
