@@ -8,7 +8,6 @@ import json
 import time
 import requests
 from typing import Optional, Dict, Any, Tuple
-from flask import current_app
 
 
 class AgentClient:
