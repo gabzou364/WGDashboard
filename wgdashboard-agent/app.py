@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import base64
 import logging
+import psutil
 from typing import Optional, List
 from fastapi import FastAPI, Request, HTTPException, Path, Body
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -134,8 +135,6 @@ async def get_status():
     Used for observability systems and real-time health monitoring.
     """
     try:
-        import psutil
-        
         # Get system metrics
         cpu_percent = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
@@ -245,8 +244,6 @@ async def get_metrics():
     Used for observability systems like Prometheus/Grafana.
     """
     try:
-        import psutil
-        
         metrics = []
         
         # System metrics

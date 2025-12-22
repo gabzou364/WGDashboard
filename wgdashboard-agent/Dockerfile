@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     wireguard-tools \
     iproute2 \
     iptables \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
@@ -33,7 +34,7 @@ EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Set environment variables
 ENV WG_AGENT_HOST=0.0.0.0

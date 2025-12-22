@@ -5,7 +5,8 @@ Handles CRUD operations for node groups in multi-node architecture
 import uuid
 from datetime import datetime
 from typing import List, Optional, Tuple, Any
-import sqlalchemy as db
+import sqlalchemy
+from sqlalchemy import func, select
 
 try:
     from flask import current_app
@@ -203,7 +204,7 @@ class NodeGroupsManager:
             nodesTable = self.DashboardConfig.nodesTable
             with self.engine.connect() as conn:
                 nodes_count = conn.execute(
-                    db.select(db.func.count()).select_from(nodesTable)
+                    select(func.count()).select_from(nodesTable)
                     .where(nodesTable.c.group_id == group_id)
                 ).scalar()
             
