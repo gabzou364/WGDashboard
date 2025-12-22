@@ -30,6 +30,8 @@ class Node:
         self.private_key_encrypted = tableData.get("private_key_encrypted")
         self.post_up = tableData.get("post_up")
         self.pre_down = tableData.get("pre_down")
+        # Panel node identification (Phase 8)
+        self.is_panel_node = tableData.get("is_panel_node", False)
         self.last_seen = tableData.get("last_seen")
         self.health_json = tableData.get("health_json", "{}")
         self.created_at = tableData.get("created_at")
@@ -57,6 +59,7 @@ class Node:
             "private_key_encrypted": self.private_key_encrypted,
             "post_up": self.post_up,
             "pre_down": self.pre_down,
+            "is_panel_node": self.is_panel_node,
             "last_seen": self.last_seen.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen else None,
             "health_json": self.health_json,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,

@@ -101,6 +101,9 @@ class DashboardConfig:
         self.__createNodeGroupsTable()
         self.__createNodesTable()
         self.__createIPAllocationsTable()
+        self.__createConfigNodesTable()
+        self.__createEndpointGroupsTable()
+        self.__createAuditLogTable()
         self.DashboardAPIKeys = self.__getAPIKeys()
         self.APIAccessed = False
         self.SetConfig("Server", "version", DashboardConfig.DashboardVersion)
@@ -178,6 +181,8 @@ class DashboardConfig:
                                    db.Column('private_key_encrypted', db.Text, nullable=True),
                                    db.Column('post_up', db.Text, nullable=True),
                                    db.Column('pre_down', db.Text, nullable=True),
+                                   # Panel node identification (Phase 8)
+                                   db.Column('is_panel_node', db.Boolean, server_default='0'),
                                    db.Column('last_seen', 
                                             (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP)),
                                    db.Column('health_json', db.Text),
@@ -203,6 +208,63 @@ class DashboardConfig:
                                                    server_default=db.func.now()),
                                           db.UniqueConstraint('node_id', 'ip_address', name='uq_node_ip')
                                           )
+        self.dbMetadata.create_all(self.engine)
+    
+    def __createConfigNodesTable(self):
+        """Create config-nodes mapping table for per-config node assignment (Phase 8)"""
+        self.configNodesTable = db.Table('ConfigNodes', self.dbMetadata,
+                                         db.Column('id', db.Integer, primary_key=True, autoincrement=True),
+                                         db.Column('config_name', db.String(255), nullable=False),
+                                         db.Column('node_id', db.String(255), nullable=False),
+                                         db.Column('is_healthy', db.Boolean, server_default='1'),
+                                         db.Column('created_at',
+                                                  (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                  server_default=db.func.now()),
+                                         db.Column('updated_at',
+                                                  (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                  server_default=db.func.now(),
+                                                  onupdate=db.func.now()),
+                                         db.UniqueConstraint('config_name', 'node_id', name='uq_config_node')
+                                         )
+        self.dbMetadata.create_all(self.engine)
+    
+    def __createEndpointGroupsTable(self):
+        """Create endpoint groups table for Mode A (Cluster/Single domain) configuration (Phase 8)"""
+        self.endpointGroupsTable = db.Table('EndpointGroups', self.dbMetadata,
+                                            db.Column('id', db.Integer, primary_key=True, autoincrement=True),
+                                            db.Column('config_name', db.String(255), nullable=False, unique=True),
+                                            db.Column('domain', db.String(255), nullable=False),
+                                            db.Column('port', db.Integer, nullable=False),
+                                            db.Column('cloudflare_zone_id', db.String(255), nullable=True),
+                                            db.Column('cloudflare_record_name', db.String(255), nullable=True),
+                                            db.Column('ttl', db.Integer, server_default='60'),
+                                            db.Column('proxied', db.Boolean, server_default='0'),
+                                            db.Column('auto_migrate', db.Boolean, server_default='1'),
+                                            db.Column('publish_only_healthy', db.Boolean, server_default='1'),
+                                            db.Column('min_nodes', db.Integer, server_default='1'),
+                                            db.Column('created_at',
+                                                     (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                     server_default=db.func.now()),
+                                            db.Column('updated_at',
+                                                     (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                     server_default=db.func.now(),
+                                                     onupdate=db.func.now())
+                                            )
+        self.dbMetadata.create_all(self.engine)
+    
+    def __createAuditLogTable(self):
+        """Create audit log table for tracking important changes (Phase 8)"""
+        self.auditLogTable = db.Table('AuditLog', self.dbMetadata,
+                                      db.Column('id', db.Integer, primary_key=True, autoincrement=True),
+                                      db.Column('timestamp',
+                                               (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                               server_default=db.func.now()),
+                                      db.Column('action', db.String(100), nullable=False),
+                                      db.Column('entity_type', db.String(50), nullable=False),
+                                      db.Column('entity_id', db.String(255), nullable=True),
+                                      db.Column('details', db.Text, nullable=True),
+                                      db.Column('user', db.String(255), nullable=True)
+                                      )
         self.dbMetadata.create_all(self.engine)
     
     def __getAPIKeys(self) -> list[DashboardAPIKey]:
