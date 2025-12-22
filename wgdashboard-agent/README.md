@@ -8,6 +8,7 @@ Production-grade WireGuard node agent for WGDashboard multi-node architecture.
 - **HMAC Authentication** - Secure request signing and verification
 - **Health Checks** - Built-in health check endpoint for monitoring
 - **Observability** - Prometheus metrics and detailed status reporting (Phase 5)
+- **Interface Management** - Full WireGuard interface configuration control (Phase 6)
 - **Logging** - Structured logging with configurable levels
 - **Security** - Replay attack prevention with timestamp validation
 - **Drift Reconciliation** - Support for syncconf operations
@@ -80,6 +81,13 @@ sudo systemctl status wgdashboard-agent
 - **DELETE /v1/wg/{interface}/peers/{public_key}** - Delete a peer
 - **POST /v1/wg/{interface}/syncconf** - Apply configuration atomically (Phase 4)
 
+### Interface Management (Phase 6)
+
+- **GET /v1/wg/{interface}/config** - Get full interface configuration
+- **PUT /v1/wg/{interface}/config** - Replace interface configuration
+- **POST /v1/wg/{interface}/enable** - Bring interface up
+- **POST /v1/wg/{interface}/disable** - Bring interface down
+
 ## Configuration
 
 Environment variables:
@@ -149,6 +157,115 @@ Returns:
 - Network I/O statistics
 - Uptime and version
 
+## Interface Configuration Management (Phase 6)
+
+### Overview
+
+Phase 6 adds full interface-level configuration management, allowing the panel to control all aspects of a node's WireGuard interface including private keys, listen ports, and firewall rules.
+
+### GET /v1/wg/{interface}/config
+
+Fetch the complete interface configuration from `/etc/wireguard/{interface}.conf`.
+
+**Response:**
+```json
+{
+  "interface": "wg0",
+  "config": {
+    "private_key": "aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789=",
+    "listen_port": 51820,
+    "address": "10.0.0.1/24",
+    "post_up": "iptables -A FORWARD -i wg0 -j ACCEPT",
+    "pre_down": "iptables -D FORWARD -i wg0 -j ACCEPT",
+    "mtu": 1420,
+    "dns": "1.1.1.1",
+    "table": "auto",
+    "raw_config": "[Interface]\nPrivateKey = ...\n..."
+  }
+}
+```
+
+### PUT /v1/wg/{interface}/config
+
+Replace the interface configuration with new settings. Includes dry-run validation and automatic backup/restore.
+
+**Request:**
+```json
+{
+  "private_key": "new-private-key-here",
+  "listen_port": 51820,
+  "address": "10.0.0.1/24",
+  "post_up": "iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE",
+  "pre_down": "iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE",
+  "mtu": 1420,
+  "dns": "1.1.1.1"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Interface configuration updated successfully",
+  "reloaded": true
+}
+```
+
+**Features:**
+- **Dry-run validation** - Config validated before applying
+- **Backup/restore** - Automatic rollback on failure
+- **Peer preservation** - Existing peers are kept
+- **Atomic update** - Interface reloaded if it was up
+
+### POST /v1/wg/{interface}/enable
+
+Bring the WireGuard interface up using `wg-quick up`.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Interface wg0 enabled successfully",
+  "was_down": true
+}
+```
+
+### POST /v1/wg/{interface}/disable
+
+Bring the WireGuard interface down using `wg-quick down`.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Interface wg0 disabled successfully",
+  "was_up": true
+}
+```
+
+### PostUp/PreDown Examples
+
+**NAT and Masquerading:**
+```bash
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
+PreDown = iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+```
+
+**Port Forwarding:**
+```bash
+PostUp = iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 8080 -j DNAT --to-destination 10.0.0.2:80
+PreDown = iptables -t nat -D PREROUTING -i eth0 -p tcp --dport 8080 -j DNAT --to-destination 10.0.0.2:80
+```
+
+**DNS Configuration:**
+```bash
+PostUp = resolvectl dns wg0 1.1.1.1 8.8.8.8
+PostUp = resolvectl domain wg0 ~.
+PreDown = resolvectl revert wg0
+```
+
 ## Development
 
 ### Running locally
@@ -186,6 +303,7 @@ curl http://localhost:8080/v1/metrics
 
 ## Version History
 
+- **v2.2.0** (Phase 6) - Interface-level configuration management with PostUp/PreDown support
 - **v2.1.0** (Phase 5) - Added `/v1/status` and `/v1/metrics` endpoints for observability
 - **v2.0.0** (Phase 4) - Production-ready FastAPI agent with syncconf support
 - **v1.0.0** - Initial multi-node agent implementation
