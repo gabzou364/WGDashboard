@@ -6,7 +6,7 @@ import json
 import time
 import threading
 import requests
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Any
 from datetime import datetime
 from collections import deque
 
@@ -246,6 +246,7 @@ class CloudflareDNSManager:
         Sync node IPs to DNS records (A and AAAA)
         Creates/updates records to match the provided list of IPs
         Removes records that are not in the list
+        All records are created with proxied=False (DNS-only)
         
         Args:
             zone_id: Cloudflare zone ID
@@ -257,6 +258,9 @@ class CloudflareDNSManager:
             Tuple of (success, message)
         """
         try:
+            # Enforce DNS-only (no proxy)
+            proxied = False
+            
             # Separate IPv4 and IPv6
             ipv4_addresses = [ip for ip in node_ips if ':' not in ip]
             ipv6_addresses = [ip for ip in node_ips if ':' in ip]
