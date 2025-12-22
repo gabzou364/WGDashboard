@@ -35,6 +35,43 @@ export default {
 		},
 		getDropup(){
 			return this.searchPeersLength - this.order <= 3
+		},
+		// Phase 7: Computed properties for traffic and expiry
+		hasTrafficLimit() {
+			return this.Peer.traffic_limit && this.Peer.traffic_limit > 0;
+		},
+		trafficUsagePercent() {
+			if (!this.hasTrafficLimit) return 0;
+			const totalTraffic = (this.Peer.cumu_receive + this.Peer.cumu_sent + 
+			                     this.Peer.total_receive + this.Peer.total_sent) * 1073741824; // GB to bytes
+			return Math.min(100, (totalTraffic / this.Peer.traffic_limit) * 100);
+		},
+		trafficLimitExceeded() {
+			return this.hasTrafficLimit && this.trafficUsagePercent >= 100;
+		},
+		trafficLimitWarning() {
+			const threshold = this.Peer.traffic_warn_threshold || 80;
+			return this.hasTrafficLimit && this.trafficUsagePercent >= threshold && this.trafficUsagePercent < 100;
+		},
+		hasExpiry() {
+			return this.Peer.expiry_date !== null && this.Peer.expiry_date !== undefined;
+		},
+		isExpired() {
+			if (!this.hasExpiry) return false;
+			const now = new Date();
+			const expiry = new Date(this.Peer.expiry_date);
+			return now >= expiry;
+		},
+		daysUntilExpiry() {
+			if (!this.hasExpiry) return -1;
+			const now = new Date();
+			const expiry = new Date(this.Peer.expiry_date);
+			const diffTime = expiry - now;
+			const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+			return Math.max(0, diffDays);
+		},
+		expiryWarning() {
+			return this.hasExpiry && !this.isExpired && this.daysUntilExpiry <= 7;
 		}
 	}
 }
@@ -140,6 +177,63 @@ export default {
 						</Transition>
 					</div>
 				</div>
+			</div>
+		</div>
+		<!-- Phase 7: Traffic & Expiry Indicators -->
+		<div v-if="hasTrafficLimit || hasExpiry" class="card-body pt-0 pb-2">
+			<!-- Traffic Limit Indicator -->
+			<div v-if="hasTrafficLimit" class="mb-2">
+				<div class="d-flex align-items-center mb-1">
+					<small class="text-muted">
+						<i class="bi bi-speedometer2 me-1"></i>
+						<LocaleText t="Traffic Usage"></LocaleText>
+					</small>
+					<small class="ms-auto" 
+					       :class="{
+					           'text-danger fw-bold': trafficLimitExceeded,
+					           'text-warning fw-bold': trafficLimitWarning,
+					           'text-muted': !trafficLimitExceeded && !trafficLimitWarning
+					       }">
+						{{ trafficUsagePercent.toFixed(1) }}%
+						<i v-if="trafficLimitExceeded" class="bi bi-exclamation-circle-fill"></i>
+						<i v-else-if="trafficLimitWarning" class="bi bi-exclamation-triangle-fill"></i>
+					</small>
+				</div>
+				<div class="progress" style="height: 6px;">
+					<div class="progress-bar" 
+					     :class="{
+					         'bg-danger': trafficLimitExceeded,
+					         'bg-warning': trafficLimitWarning,
+					         'bg-primary': !trafficLimitExceeded && !trafficLimitWarning
+					     }"
+					     :style="{width: trafficUsagePercent + '%'}"></div>
+				</div>
+			</div>
+			<!-- Expiry Date Indicator -->
+			<div v-if="hasExpiry" class="d-flex align-items-center">
+				<small class="text-muted">
+					<i class="bi bi-calendar-event me-1"></i>
+					<LocaleText t="Expiry"></LocaleText>
+				</small>
+				<small class="ms-auto"
+				       :class="{
+				           'text-danger fw-bold': isExpired,
+				           'text-warning fw-bold': expiryWarning,
+				           'text-muted': !isExpired && !expiryWarning
+				       }">
+					<span v-if="isExpired">
+						<i class="bi bi-x-circle-fill"></i>
+						<LocaleText t="Expired"></LocaleText>
+					</span>
+					<span v-else-if="daysUntilExpiry === 0">
+						<i class="bi bi-clock-fill"></i>
+						<LocaleText t="Expires today"></LocaleText>
+					</span>
+					<span v-else>
+						<i class="bi bi-clock-fill" v-if="expiryWarning"></i>
+						{{ daysUntilExpiry }} {{ daysUntilExpiry === 1 ? 'day' : 'days' }}
+					</span>
+				</small>
 			</div>
 		</div>
 		<div class="card-footer" role="button" @click="$emit('details')">

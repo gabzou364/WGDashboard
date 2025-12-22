@@ -14,29 +14,111 @@ export default {
 			data: undefined,
 			dataChanged: false,
 			showKey: false,
-			saving: false
+			saving: false,
+			trafficLimitGB: null,
+			expiryDateLocal: null
 		}
 	},
 	setup(){
 		const dashboardConfigurationStore = DashboardConfigurationStore();
 		return {dashboardConfigurationStore}
 	},
+	computed: {
+		trafficLimitBytes() {
+			if (this.trafficLimitGB === null || this.trafficLimitGB === '' || this.trafficLimitGB === 0) {
+				return null;
+			}
+			return Math.floor(this.trafficLimitGB * 1073741824); // GB to bytes
+		},
+		expiryDateISO() {
+			if (!this.expiryDateLocal) {
+				return null;
+			}
+			return new Date(this.expiryDateLocal).toISOString();
+		}
+	},
+	watch: {
+		trafficLimitGB() {
+			this.dataChanged = true;
+		},
+		expiryDateLocal() {
+			this.dataChanged = true;
+		}
+	},
 	methods: {
 		reset(){
 			if (this.selectedPeer){
 				this.data = JSON.parse(JSON.stringify(this.selectedPeer))
 				this.dataChanged = false;
+				
+				// Convert traffic_limit from bytes to GB for display
+				if (this.data.traffic_limit) {
+					this.trafficLimitGB = (this.data.traffic_limit / 1073741824).toFixed(2);
+				} else {
+					this.trafficLimitGB = null;
+				}
+				
+				// Convert expiry_date to local datetime format
+				if (this.data.expiry_date) {
+					const date = new Date(this.data.expiry_date);
+					const offset = date.getTimezoneOffset();
+					const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+					this.expiryDateLocal = localDate.toISOString().slice(0, 16);
+				} else {
+					this.expiryDateLocal = null;
+				}
 			}
 		},
 		savePeer(){
 			this.saving = true;
+			
+			// First save the regular peer settings
 			fetchPost(`/api/updatePeerSettings/${this.$route.params.id}`, this.data, (res) => {
-				this.saving = false;
 				if (res.status){
+					// Then update traffic limit if changed
+					if (this.trafficLimitBytes !== this.selectedPeer.traffic_limit) {
+						fetchPost(`/api/updatePeerTrafficLimit/${this.$route.params.id}`, {
+							id: this.data.id,
+							traffic_limit: this.trafficLimitBytes
+						}, (limitRes) => {
+							if (!limitRes.status) {
+								this.dashboardConfigurationStore.newMessage("Server", 
+									`Peer saved but traffic limit update failed: ${limitRes.message}`, "warning")
+							}
+						})
+					}
+					
+					// Then update expiry date if changed
+					if (this.expiryDateISO !== this.selectedPeer.expiry_date) {
+						fetchPost(`/api/updatePeerExpiryDate/${this.$route.params.id}`, {
+							id: this.data.id,
+							expiry_date: this.expiryDateISO
+						}, (expiryRes) => {
+							if (!expiryRes.status) {
+								this.dashboardConfigurationStore.newMessage("Server", 
+									`Peer saved but expiry date update failed: ${expiryRes.message}`, "warning")
+							}
+						})
+					}
+					
+					// Update warning threshold if changed
+					if (this.data.traffic_warn_threshold !== this.selectedPeer.traffic_warn_threshold) {
+						fetchPost(`/api/updatePeerTrafficWarningThreshold/${this.$route.params.id}`, {
+							id: this.data.id,
+							threshold: this.data.traffic_warn_threshold || 80
+						}, (thresholdRes) => {
+							if (!thresholdRes.status) {
+								this.dashboardConfigurationStore.newMessage("Server", 
+									`Peer saved but warning threshold update failed: ${thresholdRes.message}`, "warning")
+							}
+						})
+					}
+					
 					this.dashboardConfigurationStore.newMessage("Server", "Peer saved", "success")
 				}else{
 					this.dashboardConfigurationStore.newMessage("Server", res.message, "danger")
 				}
+				this.saving = false;
 				this.$emit("refresh")
 			})
 		},
@@ -197,6 +279,62 @@ export default {
 												       :disabled="this.saving"
 												       v-model="this.data.keepalive"
 												       id="peer_keep_alive">
+											</div>
+											<hr class="my-3">
+											<h6 class="text-muted mb-2">
+												<i class="bi bi-shield-lock me-2"></i>
+												<LocaleText t="Traffic & Time Restrictions"></LocaleText>
+											</h6>
+											<div>
+												<label for="peer_traffic_limit" class="form-label">
+													<small class="text-muted">
+														<LocaleText t="Traffic Limit (GB)"></LocaleText>
+													</small>
+												</label>
+												<input type="number" 
+												       class="form-control form-control-sm rounded-3"
+												       :disabled="this.saving"
+												       v-model="this.trafficLimitGB"
+												       id="peer_traffic_limit"
+												       min="0"
+												       step="0.1"
+												       placeholder="Unlimited">
+												<small class="form-text text-muted">
+													<LocaleText t="Leave empty for unlimited"></LocaleText>
+												</small>
+											</div>
+											<div>
+												<label for="peer_expiry_date" class="form-label">
+													<small class="text-muted">
+														<LocaleText t="Expiry Date"></LocaleText>
+													</small>
+												</label>
+												<input type="datetime-local" 
+												       class="form-control form-control-sm rounded-3"
+												       :disabled="this.saving"
+												       v-model="this.expiryDateLocal"
+												       id="peer_expiry_date">
+												<small class="form-text text-muted">
+													<LocaleText t="Leave empty for no expiry"></LocaleText>
+												</small>
+											</div>
+											<div>
+												<label for="peer_traffic_warn_threshold" class="form-label">
+													<small class="text-muted">
+														<LocaleText t="Traffic Warning Threshold (%)"></LocaleText>
+													</small>
+												</label>
+												<input type="number" 
+												       class="form-control form-control-sm rounded-3"
+												       :disabled="this.saving"
+												       v-model="this.data.traffic_warn_threshold"
+												       id="peer_traffic_warn_threshold"
+												       min="0"
+												       max="100"
+												       placeholder="80">
+												<small class="form-text text-muted">
+													<LocaleText t="Alert when usage reaches this percentage"></LocaleText>
+												</small>
 											</div>
 										</div>
 									</div>
