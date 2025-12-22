@@ -18,6 +18,8 @@ class Node:
         self.enabled = tableData.get("enabled", False)
         self.weight = tableData.get("weight", 100)
         self.max_peers = tableData.get("max_peers", 0)
+        # Node grouping (Phase 5)
+        self.group_id = tableData.get("group_id")
         # Per-node overrides (Phase 4)
         self.override_listen_port = tableData.get("override_listen_port")
         self.override_dns = tableData.get("override_dns")
@@ -42,6 +44,7 @@ class Node:
             "enabled": self.enabled,
             "weight": self.weight,
             "max_peers": self.max_peers,
+            "group_id": self.group_id,
             "override_listen_port": self.override_listen_port,
             "override_dns": self.override_dns,
             "override_mtu": self.override_mtu,
