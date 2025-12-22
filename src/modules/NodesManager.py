@@ -161,7 +161,9 @@ class NodesManager:
             
             update_values = {}
             allowed_fields = ['name', 'agent_url', 'wg_interface', 'endpoint', 
-                            'ip_pool_cidr', 'weight', 'max_peers', 'enabled']
+                            'ip_pool_cidr', 'weight', 'max_peers', 'enabled',
+                            'override_listen_port', 'override_dns', 'override_mtu',
+                            'override_keepalive', 'override_endpoint_allowed_ip']
             
             for field in allowed_fields:
                 if field in data:

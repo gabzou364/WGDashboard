@@ -1,0 +1,31 @@
+[Unit]
+Description=WGDashboard Agent - WireGuard Node Agent
+Documentation=https://github.com/gabzou364/WGDashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wgdashboard-agent
+ExecStart=/usr/bin/python3 /opt/wgdashboard-agent/main.py
+Restart=on-failure
+RestartSec=10s
+
+# Security
+NoNewPrivileges=false
+PrivateTmp=true
+
+# Environment
+Environment="WG_AGENT_SECRET=change-me-in-production"
+Environment="WG_AGENT_PORT=8080"
+Environment="WG_AGENT_HOST=0.0.0.0"
+Environment="WG_AGENT_LOG_LEVEL=INFO"
+Environment="MAX_TIMESTAMP_AGE=300"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wgdashboard-agent
+
+[Install]
+WantedBy=multi-user.target

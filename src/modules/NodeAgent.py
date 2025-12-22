@@ -159,6 +159,19 @@ class AgentClient:
             Tuple of (success: bool, response_data or error_message)
         """
         return self._make_request('DELETE', f'/wg/{iface}/peers/{public_key}')
+    
+    def syncconf(self, iface: str, config_base64: str) -> Tuple[bool, Any]:
+        """
+        Apply configuration using wg syncconf for atomic updates (Phase 4)
+        
+        Args:
+            iface: WireGuard interface name
+            config_base64: Base64-encoded WireGuard configuration
+            
+        Returns:
+            Tuple of (success: bool, response_data or error_message)
+        """
+        return self._make_request('POST', f'/v1/wg/{iface}/syncconf', {'config': config_base64})
 
     def test_connection(self) -> Tuple[bool, str]:
         """

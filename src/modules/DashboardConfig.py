@@ -147,6 +147,12 @@ class DashboardConfig:
                                    db.Column('enabled', db.Boolean, server_default='1'),
                                    db.Column('weight', db.Integer, server_default='100'),
                                    db.Column('max_peers', db.Integer, server_default='0'),
+                                   # Per-node overrides (Phase 4)
+                                   db.Column('override_listen_port', db.Integer, nullable=True),
+                                   db.Column('override_dns', db.String(255), nullable=True),
+                                   db.Column('override_mtu', db.Integer, nullable=True),
+                                   db.Column('override_keepalive', db.Integer, nullable=True),
+                                   db.Column('override_endpoint_allowed_ip', db.Text, nullable=True),
                                    db.Column('last_seen', 
                                             (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP)),
                                    db.Column('health_json', db.Text),

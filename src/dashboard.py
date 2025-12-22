@@ -43,6 +43,7 @@ from modules.NewConfigurationTemplates import NewConfigurationTemplates
 from modules.NodesManager import NodesManager
 from modules.IPAllocationManager import IPAllocationManager
 from modules.NodeSelector import NodeSelector
+from modules.DriftDetector import DriftDetector
 
 class CustomJsonEncoder(DefaultJSONProvider):
     def __init__(self, app):
@@ -260,6 +261,7 @@ with app.app_context():
     NodesManager: NodesManager = NodesManager(DashboardConfig)
     IPAllocManager: IPAllocationManager = IPAllocationManager(DashboardConfig)
     NodeSelector: NodeSelector = NodeSelector(NodesManager)
+    DriftDetector: DriftDetector = DriftDetector(DashboardConfig)
     InitWireguardConfigurationsList(startup=True)
     DashboardClients: DashboardClients = DashboardClients(WireguardConfigurations)
     app.register_blueprint(createClientBlueprint(WireguardConfigurations, DashboardConfig, DashboardClients))
@@ -2045,6 +2047,196 @@ def API_DeleteNode(node_id):
     except Exception as e:
         app.logger.error(f"Error deleting node: {e}")
         return ResponseObject(False, "Failed to delete node")
+
+
+@app.get(f'{APP_PREFIX}/api/drift/nodes/<node_id>')
+def API_GetNodeDrift(node_id):
+    """Get drift report for a specific node"""
+    try:
+        node = NodesManager.getNodeById(node_id)
+        if not node:
+            return ResponseObject(False, "Node not found")
+        
+        # Get agent client
+        client = NodesManager.getNodeAgentClient(node_id)
+        if not client:
+            return ResponseObject(False, "Failed to create agent client")
+        
+        # Get WireGuard dump from agent
+        success, wg_data = client.get_wg_dump(node.wg_interface)
+        
+        if not success:
+            return ResponseObject(False, f"Failed to get WireGuard dump: {wg_data}")
+        
+        # Detect drift
+        drift_report = DriftDetector.detectDrift(node_id, wg_data)
+        
+        return ResponseObject(True, "Drift detection completed", data=drift_report)
+        
+    except Exception as e:
+        app.logger.error(f"Error detecting drift for node {node_id}: {e}")
+        return ResponseObject(False, "Failed to detect drift")
+
+
+@app.get(f'{APP_PREFIX}/api/drift/nodes')
+def API_GetAllNodesDrift():
+    """Get drift report for all enabled nodes"""
+    try:
+        drift_reports = DriftDetector.detectDriftForAllNodes(NodesManager)
+        
+        # Calculate summary
+        total_drift_count = sum(1 for report in drift_reports.values() if report.get('has_drift', False))
+        total_issues = sum(report.get('summary', {}).get('total_issues', 0) for report in drift_reports.values())
+        
+        return ResponseObject(True, "Drift detection completed for all nodes", data={
+            "nodes": drift_reports,
+            "summary": {
+                "total_nodes": len(drift_reports),
+                "nodes_with_drift": total_drift_count,
+                "total_issues": total_issues
+            }
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error detecting drift for all nodes: {e}")
+        return ResponseObject(False, "Failed to detect drift for all nodes")
+
+
+@app.post(f'{APP_PREFIX}/api/drift/nodes/<node_id>/reconcile')
+def API_ReconcileNodeDrift(node_id):
+    """Reconcile drift for a specific node by applying panel configuration"""
+    try:
+        node = NodesManager.getNodeById(node_id)
+        if not node:
+            return ResponseObject(False, "Node not found")
+        
+        data = request.get_json()
+        
+        # Get what to reconcile from request body
+        reconcile_missing = data.get('reconcile_missing', True)
+        reconcile_mismatched = data.get('reconcile_mismatched', True)
+        remove_unknown = data.get('remove_unknown', False)
+        
+        # Get agent client
+        client = NodesManager.getNodeAgentClient(node_id)
+        if not client:
+            return ResponseObject(False, "Failed to create agent client")
+        
+        # First, detect current drift
+        success, wg_data = client.get_wg_dump(node.wg_interface)
+        if not success:
+            return ResponseObject(False, f"Failed to get WireGuard dump: {wg_data}")
+        
+        drift_report = DriftDetector.detectDrift(node_id, wg_data)
+        
+        if not drift_report.get('has_drift', False):
+            return ResponseObject(True, "No drift detected, nothing to reconcile")
+        
+        reconcile_results = {
+            "added": [],
+            "updated": [],
+            "removed": [],
+            "errors": []
+        }
+        
+        # Reconcile missing peers (add them to node)
+        if reconcile_missing:
+            for missing_peer in drift_report.get('missing_peers', []):
+                try:
+                    # Get full peer data from DB
+                    peer_public_key = missing_peer['public_key']
+                    peer_data = {
+                        'public_key': peer_public_key,
+                        'allowed_ips': missing_peer.get('allowed_ips', []),
+                        'persistent_keepalive': 0  # Default, would need to fetch from DB
+                    }
+                    
+                    success, result = client.add_peer(node.wg_interface, peer_data)
+                    if success:
+                        reconcile_results['added'].append(peer_public_key)
+                    else:
+                        reconcile_results['errors'].append({
+                            'peer': peer_public_key,
+                            'action': 'add',
+                            'error': result
+                        })
+                except Exception as e:
+                    reconcile_results['errors'].append({
+                        'peer': missing_peer['public_key'],
+                        'action': 'add',
+                        'error': str(e)
+                    })
+        
+        # Reconcile mismatched peers (update them on node)
+        if reconcile_mismatched:
+            for mismatched_peer in drift_report.get('mismatched_peers', []):
+                try:
+                    peer_public_key = mismatched_peer['public_key']
+                    
+                    # Build update data from mismatches
+                    update_data = {}
+                    for mismatch in mismatched_peer.get('mismatches', []):
+                        if mismatch['field'] == 'allowed_ips':
+                            update_data['allowed_ips'] = mismatch['expected']
+                        elif mismatch['field'] == 'persistent_keepalive':
+                            update_data['persistent_keepalive'] = mismatch['expected']
+                    
+                    if update_data:
+                        success, result = client.update_peer(node.wg_interface, peer_public_key, update_data)
+                        if success:
+                            reconcile_results['updated'].append(peer_public_key)
+                        else:
+                            reconcile_results['errors'].append({
+                                'peer': peer_public_key,
+                                'action': 'update',
+                                'error': result
+                            })
+                except Exception as e:
+                    reconcile_results['errors'].append({
+                        'peer': mismatched_peer['public_key'],
+                        'action': 'update',
+                        'error': str(e)
+                    })
+        
+        # Remove unknown peers (remove them from node)
+        if remove_unknown:
+            for unknown_peer in drift_report.get('unknown_peers', []):
+                try:
+                    peer_public_key = unknown_peer['public_key']
+                    success, result = client.delete_peer(node.wg_interface, peer_public_key)
+                    if success:
+                        reconcile_results['removed'].append(peer_public_key)
+                    else:
+                        reconcile_results['errors'].append({
+                            'peer': peer_public_key,
+                            'action': 'remove',
+                            'error': result
+                        })
+                except Exception as e:
+                    reconcile_results['errors'].append({
+                        'peer': unknown_peer['public_key'],
+                        'action': 'remove',
+                        'error': str(e)
+                    })
+        
+        # Build response message
+        message_parts = []
+        if reconcile_results['added']:
+            message_parts.append(f"Added {len(reconcile_results['added'])} peers")
+        if reconcile_results['updated']:
+            message_parts.append(f"Updated {len(reconcile_results['updated'])} peers")
+        if reconcile_results['removed']:
+            message_parts.append(f"Removed {len(reconcile_results['removed'])} peers")
+        if reconcile_results['errors']:
+            message_parts.append(f"{len(reconcile_results['errors'])} errors")
+        
+        message = ", ".join(message_parts) if message_parts else "No actions taken"
+        
+        return ResponseObject(True, message, data=reconcile_results)
+        
+    except Exception as e:
+        app.logger.error(f"Error reconciling drift for node {node_id}: {e}")
+        return ResponseObject(False, f"Failed to reconcile drift: {str(e)}")
 
 
 '''
