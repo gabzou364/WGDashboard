@@ -102,6 +102,10 @@ def peerInformationBackgroundThread():
                                 if c.configurationInfo.PeerHistoricalEndpointTracking:
                                     c.logPeersHistoryEndpoint()
                             c.getRestrictedPeersList()
+                            # Phase 7: Enforce traffic and time limits
+                            if delay == 6:
+                                c.enforceTrafficLimits()
+                                c.enforceExpiryDates()
             except Exception as e:
                 app.logger.error(f"[WGDashboard] Background Thread #1 Error", e)
 
@@ -811,6 +815,113 @@ def API_resetPeerData(configName):
         wgc.allowAccessPeers([id])
     
     return ResponseObject(status=resetStatus)
+
+@app.post(f'{APP_PREFIX}/api/updatePeerTrafficLimit/<configName>')
+def API_updatePeerTrafficLimit(configName):
+    """Phase 7: Update peer traffic limit"""
+    data = request.get_json()
+    peer_id = data.get('id')
+    traffic_limit = data.get('traffic_limit')  # in bytes
+    
+    if not peer_id or configName not in WireguardConfigurations.keys():
+        return ResponseObject(False, "Configuration/Peer does not exist")
+    
+    try:
+        wgc = WireguardConfigurations.get(configName)
+        foundPeer, peer = wgc.searchPeer(peer_id)
+        if not foundPeer:
+            return ResponseObject(False, "Peer does not exist")
+        
+        # Update traffic limit in database
+        with wgc.engine.begin() as conn:
+            conn.execute(
+                wgc.peersTable.update().values({
+                    "traffic_limit": traffic_limit if traffic_limit else None
+                }).where(
+                    wgc.peersTable.c.id == peer_id
+                )
+            )
+        
+        wgc.getPeers()
+        return ResponseObject(True, "Traffic limit updated successfully")
+    except Exception as e:
+        app.logger.error(f"[Phase 7] Error updating traffic limit: {e}")
+        return ResponseObject(False, str(e))
+
+@app.post(f'{APP_PREFIX}/api/updatePeerExpiryDate/<configName>')
+def API_updatePeerExpiryDate(configName):
+    """Phase 7: Update peer expiry date"""
+    data = request.get_json()
+    peer_id = data.get('id')
+    expiry_date = data.get('expiry_date')  # ISO format string or None
+    
+    if not peer_id or configName not in WireguardConfigurations.keys():
+        return ResponseObject(False, "Configuration/Peer does not exist")
+    
+    try:
+        wgc = WireguardConfigurations.get(configName)
+        foundPeer, peer = wgc.searchPeer(peer_id)
+        if not foundPeer:
+            return ResponseObject(False, "Peer does not exist")
+        
+        # Parse expiry date if provided
+        expiry_datetime = None
+        if expiry_date:
+            try:
+                expiry_datetime = datetime.fromisoformat(expiry_date)
+            except ValueError:
+                return ResponseObject(False, "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)")
+        
+        # Update expiry date in database
+        with wgc.engine.begin() as conn:
+            conn.execute(
+                wgc.peersTable.update().values({
+                    "expiry_date": expiry_datetime
+                }).where(
+                    wgc.peersTable.c.id == peer_id
+                )
+            )
+        
+        wgc.getPeers()
+        return ResponseObject(True, "Expiry date updated successfully")
+    except Exception as e:
+        app.logger.error(f"[Phase 7] Error updating expiry date: {e}")
+        return ResponseObject(False, str(e))
+
+@app.post(f'{APP_PREFIX}/api/updatePeerTrafficWarningThreshold/<configName>')
+def API_updatePeerTrafficWarningThreshold(configName):
+    """Phase 7: Update peer traffic warning threshold (percentage)"""
+    data = request.get_json()
+    peer_id = data.get('id')
+    threshold = data.get('threshold', 80)  # default 80%
+    
+    if not peer_id or configName not in WireguardConfigurations.keys():
+        return ResponseObject(False, "Configuration/Peer does not exist")
+    
+    try:
+        if not isinstance(threshold, int) or threshold < 0 or threshold > 100:
+            return ResponseObject(False, "Threshold must be between 0 and 100")
+        
+        wgc = WireguardConfigurations.get(configName)
+        foundPeer, peer = wgc.searchPeer(peer_id)
+        if not foundPeer:
+            return ResponseObject(False, "Peer does not exist")
+        
+        # Update threshold in database
+        with wgc.engine.begin() as conn:
+            conn.execute(
+                wgc.peersTable.update().values({
+                    "traffic_warn_threshold": threshold
+                }).where(
+                    wgc.peersTable.c.id == peer_id
+                )
+            )
+        
+        wgc.getPeers()
+        return ResponseObject(True, "Warning threshold updated successfully")
+    except Exception as e:
+        app.logger.error(f"[Phase 7] Error updating warning threshold: {e}")
+        return ResponseObject(False, str(e))
 
 @app.post(f'{APP_PREFIX}/api/deletePeers/<configName>')
 def API_deletePeers(configName: str) -> ResponseObject:
