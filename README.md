@@ -98,6 +98,72 @@ WGDashboard now supports managing multiple WireGuard nodes from a single dashboa
 
 ## Phase 2 Features (Available Now)
 
+- **Intelligent Load Balancing**: Automatic peer distribution based on node capacity and weight
+- **Panel-Side IP Management (IPAM)**: Allocate IPs from node-specific pools with conflict prevention
+- **Node Health Monitoring**: Real-time health checks and peer statistics
+- **Remote Peer Operations**: Create, update, and delete peers on remote nodes via API
+
+See [Phase 2 Documentation](docs/PHASE2_MULTINODE.md) for details.
+
+## Phase 4 Features (NEW!)
+
+WGDashboard Phase 4 adds critical operational capabilities for production deployments:
+
+- **🔍 Drift Detection**: Automatically identify configuration mismatches between panel and nodes
+  - Unknown peers on nodes not in panel database
+  - Missing peers that should be on nodes
+  - Configuration differences (allowed IPs, keepalive, etc.)
+- **🔧 Drift Reconciliation**: Automated or manual drift resolution with safety controls
+  - Add missing peers to nodes
+  - Update mismatched configurations
+  - Remove unknown peers (optional)
+  - Detailed action reporting
+- **⚙️ Per-Node Overrides**: Node-specific configuration parameters
+  - Custom listen ports, DNS, MTU, keepalive
+  - Override global defaults per node
+  - Ideal for multi-region deployments
+- **🚀 Production Agent**: Enterprise-ready FastAPI-based worker
+  - Async request handling with FastAPI + uvicorn
+  - Structured logging with configurable levels
+  - Type-safe request validation with Pydantic
+  - Zero-downtime updates via syncconf endpoint
+  - Systemd service integration
+
+See [Phase 4 Documentation](docs/PHASE4_MULTINODE.md) for complete feature guide.
+
+### Quick Start: Drift Detection
+
+```bash
+# Detect drift on a specific node
+curl http://your-panel/api/drift/nodes/{node-id}
+
+# Detect drift on all nodes
+curl http://your-panel/api/drift/nodes
+
+# Reconcile drift automatically
+curl -X POST http://your-panel/api/drift/nodes/{node-id}/reconcile \
+  -H "Content-Type: application/json" \
+  -d '{"reconcile_missing": true, "reconcile_mismatched": true}'
+```
+
+### Quick Start: Production Agent
+
+```bash
+# Install production agent
+sudo mkdir -p /opt/wgdashboard-agent
+sudo cp -r wgdashboard-agent/* /opt/wgdashboard-agent/
+cd /opt/wgdashboard-agent
+sudo pip3 install -r requirements.txt
+
+# Configure and start
+sudo cp .env.example .env
+sudo nano .env  # Set WG_AGENT_SECRET
+sudo cp wgdashboard-agent.service /etc/systemd/system/
+sudo systemctl enable --now wgdashboard-agent
+```
+
+## Architecture Documentation
+
 ✅ **Node Selection & Load Balancing**
 - Auto-select best node based on current load
 - Manual node selection for specific routing
@@ -120,19 +186,18 @@ WGDashboard now supports managing multiple WireGuard nodes from a single dashboa
 
 ## Quick Start
 
-1. **Deploy Node Agents** on your WireGuard servers
+1. **Deploy Node Agents** on your WireGuard servers (see below)
 2. **Configure Nodes** in the dashboard
 3. **Create Peers** with automatic node selection and IP allocation
+4. **Monitor Drift** to ensure configuration integrity
 
-For detailed information, see:
-- [Phase 2 Multi-Node Features](docs/PHASE2_MULTINODE.md) - Peer management and IPAM
-- [Multi-Node Architecture Documentation](docs/MULTI_NODE_ARCHITECTURE.md) - Overall architecture
-3. **Monitor Health** and manage peers across all nodes
+## Documentation
 
-For detailed setup instructions, see:
-- [Multi-Node Architecture Documentation](docs/MULTI_NODE_ARCHITECTURE.md)
-- [Agent Deployment Guide](docs/AGENT_DEPLOYMENT.md)
-- [Example Agent Implementation](docs/wg-agent-example.py)
+- **[Phase 4: Drift Detection & Production Agent](docs/PHASE4_MULTINODE.md)** - NEW! Drift detection, reconciliation, per-node overrides
+- **[Phase 2: Peer Management & IPAM](docs/PHASE2_MULTINODE.md)** - Load balancing and IP allocation
+- **[Multi-Node Architecture](docs/MULTI_NODE_ARCHITECTURE.md)** - Overall architecture and security
+- **[Agent Deployment Guide](docs/AGENT_DEPLOYMENT.md)** - Install and configure agents
+- **[Example Agent](docs/wg-agent-example.py)** - Simple reference implementation
 
 ## Architecture Overview
 
