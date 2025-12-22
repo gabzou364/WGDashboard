@@ -27,7 +27,7 @@ def _log_info(msg):
     """Helper to log info messages"""
     if _has_flask:
         try:
-            _log_info(msg)
+            current_app.logger.info(msg)
         except (RuntimeError, NameError):
             pass
 
@@ -36,9 +36,9 @@ def _log_error(msg, exc=None):
     if _has_flask:
         try:
             if exc:
-                _log_error(msg, exc)
+                current_app.logger.error(msg, exc)
             else:
-                _log_error(msg)
+                current_app.logger.error(msg)
         except (RuntimeError, NameError):
             pass
 

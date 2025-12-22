@@ -91,14 +91,15 @@ class IPAllocationManager:
         Find next available IP in network
         
         Reserves first usable address (.1 for most subnets) for server/gateway
+        Note: network.hosts() already excludes network and broadcast addresses
         """
         hosts = list(network.hosts())
         if not hosts:
             return None
         
         # Reserve first usable host for server/gateway (typically .1)
-        # Skip network address and first host
-        for host in hosts[1:]:  # Start from second host
+        # Start from second host address
+        for host in hosts[1:]:
             ip_str = f"{host}/{network.prefixlen}"
             if ip_str not in allocated_ips:
                 return ip_str
