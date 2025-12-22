@@ -4,8 +4,42 @@ Implements load balancing and node selection logic for peer distribution
 """
 import json
 from typing import Optional, List, Tuple
-from flask import current_app
-from .Node import Node
+
+try:
+    from flask import current_app
+    _has_flask = True
+except ImportError:
+    _has_flask = False
+
+try:
+    from .Node import Node
+except ImportError:
+    from Node import Node
+
+
+def _log_debug(msg):
+    """Helper to log debug messages"""
+    if _has_flask:
+        try:
+            current_app.logger.debug(msg)
+        except RuntimeError:
+            pass  # Not in app context
+
+def _log_info(msg):
+    """Helper to log info messages"""
+    if _has_flask:
+        try:
+            current_app.logger.info(msg)
+        except RuntimeError:
+            pass  # Not in app context
+
+def _log_error(msg):
+    """Helper to log error messages"""
+    if _has_flask:
+        try:
+            current_app.logger.error(msg)
+        except RuntimeError:
+            pass  # Not in app context
 
 
 class NodeSelector:
@@ -71,7 +105,7 @@ class NodeSelector:
                 
                 # Check max_peers soft cap
                 if node.max_peers > 0 and active_peers >= node.max_peers:
-                    current_app.logger.debug(f"Node {node.name} at capacity: {active_peers}/{node.max_peers}")
+                    _log_debug(f"Node {node.name} at capacity: {active_peers}/{node.max_peers}")
                     continue
                 
                 # Calculate score
@@ -84,7 +118,7 @@ class NodeSelector:
                     score = active_peers / node.weight if node.weight > 0 else active_peers
                 
                 candidates.append((score, node))
-                current_app.logger.debug(
+                _log_debug(
                     f"Node {node.name}: active={active_peers}, "
                     f"max={node.max_peers}, weight={node.weight}, score={score:.4f}"
                 )
@@ -96,11 +130,11 @@ class NodeSelector:
             candidates.sort(key=lambda x: x[0])
             selected_node = candidates[0][1]
             
-            current_app.logger.info(f"Auto-selected node: {selected_node.name}")
+            _log_info(f"Auto-selected node: {selected_node.name}")
             return True, selected_node, f"Auto-selected node {selected_node.name}"
             
         except Exception as e:
-            current_app.logger.error(f"Error in node selection: {e}")
+            _log_error(f"Error in node selection: {e}")
             return False, None, str(e)
     
     def _getNodeActivePeers(self, node: Node) -> int:
@@ -127,5 +161,5 @@ class NodeSelector:
             return 0
             
         except Exception as e:
-            current_app.logger.error(f"Error getting active peers for node {node.id}: {e}")
+            _log_error(f"Error getting active peers for node {node.id}: {e}")
             return 0

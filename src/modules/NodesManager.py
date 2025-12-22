@@ -8,9 +8,39 @@ import secrets
 from datetime import datetime
 from typing import List, Optional, Tuple, Any
 import sqlalchemy as db
-from flask import current_app
-from .Node import Node
-from .NodeAgent import AgentClient
+
+try:
+    from flask import current_app
+    _has_flask = True
+except ImportError:
+    _has_flask = False
+
+try:
+    from .Node import Node
+    from .NodeAgent import AgentClient
+except ImportError:
+    from Node import Node
+    from NodeAgent import AgentClient
+
+
+def _log_info(msg):
+    """Helper to log info messages"""
+    if _has_flask:
+        try:
+            _log_info(msg)
+        except (RuntimeError, NameError):
+            pass
+
+def _log_error(msg, exc=None):
+    """Helper to log error messages"""
+    if _has_flask:
+        try:
+            if exc:
+                _log_error(msg, exc)
+            else:
+                _log_error(msg)
+        except (RuntimeError, NameError):
+            pass
 
 
 class NodesManager:
@@ -31,7 +61,7 @@ class NodesManager:
                     nodes.append(Node(dict(row)))
                 return nodes
         except Exception as e:
-            current_app.logger.error(f"Error getting all nodes: {e}")
+            _log_error(f"Error getting all nodes: {e}")
             return []
     
     def getNodeById(self, node_id: str) -> Optional[Node]:
@@ -45,7 +75,7 @@ class NodesManager:
                     return Node(dict(result))
                 return None
         except Exception as e:
-            current_app.logger.error(f"Error getting node {node_id}: {e}")
+            _log_error(f"Error getting node {node_id}: {e}")
             return None
     
     def getEnabledNodes(self) -> List[Node]:
@@ -60,7 +90,7 @@ class NodesManager:
                     nodes.append(Node(dict(row)))
                 return nodes
         except Exception as e:
-            current_app.logger.error(f"Error getting enabled nodes: {e}")
+            _log_error(f"Error getting enabled nodes: {e}")
             return []
     
     def createNode(self, name: str, agent_url: str, wg_interface: str,
@@ -110,11 +140,11 @@ class NodesManager:
                 )
             
             node = self.getNodeById(node_id)
-            current_app.logger.info(f"Created node: {name} ({node_id})")
+            _log_info(f"Created node: {name} ({node_id})")
             return True, node
             
         except Exception as e:
-            current_app.logger.error(f"Error creating node: {e}")
+            _log_error(f"Error creating node: {e}")
             return False, str(e)
     
     def updateNode(self, node_id: str, data: dict) -> Tuple[bool, Any]:
@@ -151,11 +181,11 @@ class NodesManager:
                     )
             
             updated_node = self.getNodeById(node_id)
-            current_app.logger.info(f"Updated node: {node_id}")
+            _log_info(f"Updated node: {node_id}")
             return True, updated_node
             
         except Exception as e:
-            current_app.logger.error(f"Error updating node {node_id}: {e}")
+            _log_error(f"Error updating node {node_id}: {e}")
             return False, str(e)
     
     def deleteNode(self, node_id: str) -> Tuple[bool, str]:
@@ -175,11 +205,11 @@ class NodesManager:
                     self.nodesTable.delete().where(self.nodesTable.c.id == node_id)
                 )
             
-            current_app.logger.info(f"Deleted node: {node_id}")
+            _log_info(f"Deleted node: {node_id}")
             return True, "Node deleted successfully"
             
         except Exception as e:
-            current_app.logger.error(f"Error deleting node {node_id}: {e}")
+            _log_error(f"Error deleting node {node_id}: {e}")
             return False, str(e)
     
     def toggleNodeEnabled(self, node_id: str, enabled: bool) -> Tuple[bool, Any]:
@@ -203,11 +233,11 @@ class NodesManager:
             
             updated_node = self.getNodeById(node_id)
             status = "enabled" if enabled else "disabled"
-            current_app.logger.info(f"Node {node_id} {status}")
+            _log_info(f"Node {node_id} {status}")
             return True, updated_node
             
         except Exception as e:
-            current_app.logger.error(f"Error toggling node {node_id}: {e}")
+            _log_error(f"Error toggling node {node_id}: {e}")
             return False, str(e)
     
     def testNodeConnection(self, node_id: str) -> Tuple[bool, str]:
@@ -229,7 +259,7 @@ class NodesManager:
             return success, message
             
         except Exception as e:
-            current_app.logger.error(f"Error testing node connection {node_id}: {e}")
+            _log_error(f"Error testing node connection {node_id}: {e}")
             return False, str(e)
     
     def updateNodeHealth(self, node_id: str, health_data: dict) -> bool:
@@ -252,7 +282,7 @@ class NodesManager:
                 )
             return True
         except Exception as e:
-            current_app.logger.error(f"Error updating node health {node_id}: {e}")
+            _log_error(f"Error updating node health {node_id}: {e}")
             return False
     
     def getNodeAgentClient(self, node_id: str) -> Optional[AgentClient]:
