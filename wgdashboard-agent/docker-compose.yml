@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  wgdashboard-agent:
+    build: .
+    image: wgdashboard-agent:latest
+    container_name: wgdashboard-agent
+    restart: unless-stopped
+    
+    # Required for WireGuard operations
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    
+    # For full WireGuard functionality, privileged mode may be required
+    # privileged: true
+    
+    # Network mode host allows WireGuard to manage network interfaces
+    network_mode: host
+    
+    # Mount WireGuard configuration directory
+    volumes:
+      - /etc/wireguard:/etc/wireguard:rw
+      - ./logs:/app/logs
+    
+    # Environment variables
+    environment:
+      - WG_AGENT_SECRET=${WG_AGENT_SECRET}
+      - WG_AGENT_HOST=0.0.0.0
+      - WG_AGENT_PORT=8080
+      - WG_AGENT_LOG_LEVEL=INFO
+      - MAX_TIMESTAMP_AGE=300
+    
+    # Load environment from .env file
+    env_file:
+      - .env
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
