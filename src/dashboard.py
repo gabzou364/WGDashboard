@@ -2239,6 +2239,83 @@ def API_ReconcileNodeDrift(node_id):
         return ResponseObject(False, f"Failed to reconcile drift: {str(e)}")
 
 
+# Interface-Level Configuration Management (Phase 6)
+@app.get(f'{APP_PREFIX}/api/nodes/<node_id>/interface')
+def API_GetNodeInterface(node_id):
+    """Get node interface configuration"""
+    try:
+        success, result = NodesManager.getNodeInterfaceConfig(node_id)
+        if success:
+            return ResponseObject(True, "Interface configuration retrieved", data=result)
+        else:
+            return ResponseObject(False, result)
+    except Exception as e:
+        app.logger.error(f"Error getting node interface: {e}")
+        return ResponseObject(False, "Failed to get node interface configuration")
+
+
+@app.put(f'{APP_PREFIX}/api/nodes/<node_id>/interface')
+def API_UpdateNodeInterface(node_id):
+    """Update node interface configuration in panel database"""
+    try:
+        data = request.get_json()
+        
+        # Extract interface-level fields
+        update_data = {}
+        interface_fields = ['private_key_encrypted', 'override_listen_port', 
+                          'post_up', 'pre_down', 'override_dns', 'override_mtu']
+        
+        for field in interface_fields:
+            if field in data:
+                update_data[field] = data[field]
+        
+        if not update_data:
+            return ResponseObject(False, "No interface fields to update")
+        
+        success, result = NodesManager.updateNode(node_id, update_data)
+        if success:
+            return ResponseObject(True, "Node interface configuration updated", data=result.toJson() if hasattr(result, 'toJson') else result)
+        else:
+            return ResponseObject(False, result)
+            
+    except Exception as e:
+        app.logger.error(f"Error updating node interface: {e}")
+        return ResponseObject(False, "Failed to update node interface configuration")
+
+
+@app.post(f'{APP_PREFIX}/api/nodes/<node_id>/interface/sync')
+def API_SyncNodeInterface(node_id):
+    """Manually sync interface configuration to node agent"""
+    try:
+        success, message = NodesManager.syncNodeInterfaceConfig(node_id)
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error syncing node interface: {e}")
+        return ResponseObject(False, "Failed to sync node interface configuration")
+
+
+@app.post(f'{APP_PREFIX}/api/nodes/<node_id>/interface/enable')
+def API_EnableNodeInterface(node_id):
+    """Enable (bring up) node interface"""
+    try:
+        success, message = NodesManager.enableNodeInterface(node_id)
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error enabling node interface: {e}")
+        return ResponseObject(False, "Failed to enable node interface")
+
+
+@app.post(f'{APP_PREFIX}/api/nodes/<node_id>/interface/disable')
+def API_DisableNodeInterface(node_id):
+    """Disable (bring down) node interface"""
+    try:
+        success, message = NodesManager.disableNodeInterface(node_id)
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error disabling node interface: {e}")
+        return ResponseObject(False, "Failed to disable node interface")
+
+
 '''
 Index Page
 '''

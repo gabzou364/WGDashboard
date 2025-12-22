@@ -27,7 +27,7 @@ MAX_TIMESTAMP_AGE = int(os.getenv('MAX_TIMESTAMP_AGE', '300'))
 app = FastAPI(
     title="WGDashboard Agent",
     description="Production-grade WireGuard node agent for WGDashboard multi-node architecture",
-    version="2.0.0"
+    version="2.2.0"
 )
 
 
@@ -46,6 +46,18 @@ class PeerUpdateRequest(BaseModel):
 
 class SyncconfRequest(BaseModel):
     config: str = Field(..., description="Base64-encoded WireGuard configuration")
+
+
+class InterfaceConfigRequest(BaseModel):
+    """Request model for updating full interface configuration (Phase 6)"""
+    private_key: str = Field(..., description="WireGuard private key for the interface")
+    listen_port: Optional[int] = Field(None, description="UDP port to listen on")
+    address: Optional[str] = Field(None, description="Interface IP address(es)")
+    post_up: Optional[str] = Field(None, description="Commands to run after interface is up")
+    pre_down: Optional[str] = Field(None, description="Commands to run before interface goes down")
+    mtu: Optional[int] = Field(None, description="MTU for the interface")
+    dns: Optional[str] = Field(None, description="DNS servers for the interface")
+    table: Optional[str] = Field(None, description="Routing table to use")
 
 
 # Middleware for HMAC authentication
@@ -123,7 +135,7 @@ async def health_check():
         "status": "ok",
         "timestamp": int(time.time()),
         "uptime": int(uptime),
-        "version": "2.0.0"
+        "version": "2.2.0"
     }
 
 
@@ -557,6 +569,310 @@ async def syncconf(
         raise HTTPException(status_code=500, detail=f"Failed to synchronize configuration: {e.stderr.decode() if e.stderr else str(e)}")
     except Exception as e:
         logger.error(f"Error syncing configuration for {interface}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Interface-Level Configuration Management (Phase 6)
+@app.get("/v1/wg/{interface}/config")
+async def get_interface_config(interface: str = Path(..., description="WireGuard interface name")):
+    """
+    Get full WireGuard interface configuration (Phase 6)
+    Returns the complete configuration from /etc/wireguard/{interface}.conf
+    """
+    try:
+        logger.info(f"Getting interface configuration for {interface}")
+        
+        config_path = f"/etc/wireguard/{interface}.conf"
+        
+        if not os.path.exists(config_path):
+            logger.error(f"Configuration file not found: {config_path}")
+            raise HTTPException(status_code=404, detail=f"Configuration file not found: {config_path}")
+        
+        # Read the configuration file
+        with open(config_path, 'r') as f:
+            config_content = f.read()
+        
+        # Parse the configuration to extract key details
+        config_lines = config_content.strip().split('\n')
+        parsed_config = {
+            'private_key': None,
+            'listen_port': None,
+            'address': None,
+            'post_up': None,
+            'pre_down': None,
+            'mtu': None,
+            'dns': None,
+            'table': None,
+            'raw_config': config_content
+        }
+        
+        current_section = None
+        for line in config_lines:
+            line = line.strip()
+            if line.startswith('['):
+                current_section = line.lower()
+            elif current_section == '[interface]' and '=' in line:
+                key, value = line.split('=', 1)
+                key = key.strip().lower()
+                value = value.strip()
+                
+                if key == 'privatekey':
+                    parsed_config['private_key'] = value
+                elif key == 'listenport':
+                    parsed_config['listen_port'] = int(value)
+                elif key == 'address':
+                    parsed_config['address'] = value
+                elif key == 'postup':
+                    parsed_config['post_up'] = value
+                elif key == 'predown':
+                    parsed_config['pre_down'] = value
+                elif key == 'mtu':
+                    parsed_config['mtu'] = int(value)
+                elif key == 'dns':
+                    parsed_config['dns'] = value
+                elif key == 'table':
+                    parsed_config['table'] = value
+        
+        logger.info(f"Successfully retrieved configuration for {interface}")
+        return {
+            'interface': interface,
+            'config': parsed_config
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting interface configuration for {interface}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/v1/wg/{interface}/config")
+async def set_interface_config(
+    interface: str = Path(..., description="WireGuard interface name"),
+    config_data: InterfaceConfigRequest = Body(...)
+):
+    """
+    Replace WireGuard interface configuration (Phase 6)
+    Updates /etc/wireguard/{interface}.conf and reloads the interface
+    Includes dry-run validation before applying
+    """
+    try:
+        logger.info(f"Updating interface configuration for {interface}")
+        
+        config_path = f"/etc/wireguard/{interface}.conf"
+        backup_path = f"{config_path}.backup"
+        temp_path = f"{config_path}.tmp"
+        
+        # Backup existing configuration if it exists
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                backup_content = f.read()
+            with open(backup_path, 'w') as f:
+                f.write(backup_content)
+        
+        # Build new configuration file
+        config_lines = ["[Interface]"]
+        
+        # Required field
+        config_lines.append(f"PrivateKey = {config_data.private_key}")
+        
+        # Optional fields
+        if config_data.listen_port:
+            config_lines.append(f"ListenPort = {config_data.listen_port}")
+        if config_data.address:
+            config_lines.append(f"Address = {config_data.address}")
+        if config_data.mtu:
+            config_lines.append(f"MTU = {config_data.mtu}")
+        if config_data.dns:
+            config_lines.append(f"DNS = {config_data.dns}")
+        if config_data.table:
+            config_lines.append(f"Table = {config_data.table}")
+        if config_data.post_up:
+            config_lines.append(f"PostUp = {config_data.post_up}")
+        if config_data.pre_down:
+            config_lines.append(f"PreDown = {config_data.pre_down}")
+        
+        # Add existing peer configurations if any
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                existing_content = f.read()
+            
+            # Extract [Peer] sections from existing config
+            peer_sections = []
+            lines = existing_content.split('\n')
+            in_peer_section = False
+            current_peer = []
+            
+            for line in lines:
+                if line.strip().startswith('[Peer]'):
+                    if current_peer:
+                        peer_sections.append('\n'.join(current_peer))
+                    current_peer = [line]
+                    in_peer_section = True
+                elif in_peer_section:
+                    if line.strip().startswith('['):
+                        # New section, end peer
+                        if current_peer:
+                            peer_sections.append('\n'.join(current_peer))
+                        current_peer = []
+                        in_peer_section = False
+                    else:
+                        current_peer.append(line)
+            
+            # Add last peer if exists
+            if current_peer:
+                peer_sections.append('\n'.join(current_peer))
+            
+            # Add peer sections to new config
+            if peer_sections:
+                config_lines.append("")
+                for peer in peer_sections:
+                    config_lines.append(peer)
+        
+        new_config = '\n'.join(config_lines) + '\n'
+        
+        # Write to temporary file for validation
+        with open(temp_path, 'w') as f:
+            f.write(new_config)
+        
+        # Dry-run validation: check if wg can parse the config
+        try:
+            # Use wg show to validate the private key format
+            subprocess.run([
+                'wg', 'show', interface
+            ], capture_output=True)
+            
+            # Validate the config syntax by trying to read it
+            subprocess.run([
+                'wg', 'showconf', interface
+            ], capture_output=True)
+            
+            logger.info(f"Dry-run validation passed for {interface}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Dry-run validation failed for {interface}: {e.stderr.decode() if e.stderr else str(e)}")
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise HTTPException(status_code=400, detail=f"Configuration validation failed: {e.stderr.decode() if e.stderr else str(e)}")
+        
+        # Move temp file to actual config path
+        os.rename(temp_path, config_path)
+        
+        # Reload the interface (bring down and up)
+        try:
+            # Check if interface is currently up
+            try:
+                subprocess.run(['wg', 'show', interface], check=True, capture_output=True)
+                interface_was_up = True
+            except subprocess.CalledProcessError:
+                interface_was_up = False
+            
+            if interface_was_up:
+                # Bring interface down
+                subprocess.run(['wg-quick', 'down', interface], check=True, capture_output=True)
+                # Bring interface up with new config
+                subprocess.run(['wg-quick', 'up', interface], check=True, capture_output=True)
+                logger.info(f"Successfully reloaded interface {interface} with new configuration")
+            else:
+                logger.info(f"Interface {interface} was not up, configuration updated but not loaded")
+            
+            return {
+                'status': 'success',
+                'message': f'Interface configuration updated successfully',
+                'reloaded': interface_was_up
+            }
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to reload interface {interface}: {e.stderr.decode() if e.stderr else str(e)}")
+            # Restore backup
+            if os.path.exists(backup_path):
+                os.rename(backup_path, config_path)
+                logger.info(f"Restored backup configuration for {interface}")
+            raise HTTPException(status_code=500, detail=f"Failed to reload interface: {e.stderr.decode() if e.stderr else str(e)}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating interface configuration for {interface}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/wg/{interface}/enable")
+async def enable_interface(interface: str = Path(..., description="WireGuard interface name")):
+    """
+    Bring WireGuard interface up (Phase 6)
+    """
+    try:
+        logger.info(f"Enabling interface {interface}")
+        
+        # Check if interface is already up
+        try:
+            subprocess.run(['wg', 'show', interface], check=True, capture_output=True)
+            logger.info(f"Interface {interface} is already up")
+            return {
+                'status': 'success',
+                'message': f'Interface {interface} is already up',
+                'was_down': False
+            }
+        except subprocess.CalledProcessError:
+            pass  # Interface is down, proceed to bring it up
+        
+        # Bring interface up
+        result = subprocess.run([
+            'wg-quick', 'up', interface
+        ], check=True, capture_output=True)
+        
+        logger.info(f"Successfully enabled interface {interface}")
+        return {
+            'status': 'success',
+            'message': f'Interface {interface} enabled successfully',
+            'was_down': True
+        }
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to enable interface {interface}: {e.stderr.decode() if e.stderr else str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to enable interface: {e.stderr.decode() if e.stderr else str(e)}")
+    except Exception as e:
+        logger.error(f"Error enabling interface {interface}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/wg/{interface}/disable")
+async def disable_interface(interface: str = Path(..., description="WireGuard interface name")):
+    """
+    Bring WireGuard interface down (Phase 6)
+    """
+    try:
+        logger.info(f"Disabling interface {interface}")
+        
+        # Check if interface is up
+        try:
+            subprocess.run(['wg', 'show', interface], check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            logger.info(f"Interface {interface} is already down")
+            return {
+                'status': 'success',
+                'message': f'Interface {interface} is already down',
+                'was_up': False
+            }
+        
+        # Bring interface down
+        result = subprocess.run([
+            'wg-quick', 'down', interface
+        ], check=True, capture_output=True)
+        
+        logger.info(f"Successfully disabled interface {interface}")
+        return {
+            'status': 'success',
+            'message': f'Interface {interface} disabled successfully',
+            'was_up': True
+        }
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to disable interface {interface}: {e.stderr.decode() if e.stderr else str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to disable interface: {e.stderr.decode() if e.stderr else str(e)}")
+    except Exception as e:
+        logger.error(f"Error disabling interface {interface}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

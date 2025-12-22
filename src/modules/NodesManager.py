@@ -230,7 +230,9 @@ class NodesManager:
                             'ip_pool_cidr', 'weight', 'max_peers', 'enabled',
                             'group_id',  # Phase 5
                             'override_listen_port', 'override_dns', 'override_mtu',
-                            'override_keepalive', 'override_endpoint_allowed_ip']
+                            'override_keepalive', 'override_endpoint_allowed_ip',
+                            # Phase 6 - Interface-level configuration
+                            'private_key_encrypted', 'post_up', 'pre_down']
             
             for field in allowed_fields:
                 if field in data:
@@ -365,3 +367,165 @@ class NodesManager:
         if node:
             return AgentClient(node.agent_url, node.secret_encrypted)
         return None
+    
+    # Interface-Level Configuration Management (Phase 6)
+    
+    def syncNodeInterfaceConfig(self, node_id: str) -> Tuple[bool, str]:
+        """
+        Sync interface configuration to node (Phase 6)
+        Pushes the node's interface-level configuration to the agent
+        
+        Args:
+            node_id: Node ID to sync
+            
+        Returns:
+            Tuple of (success: bool, message)
+        """
+        try:
+            node = self.getNodeById(node_id)
+            if not node:
+                return False, "Node not found"
+            
+            if not node.wg_interface:
+                return False, "Node has no WireGuard interface configured"
+            
+            # Build interface configuration
+            config_data = {}
+            
+            # Private key is required
+            if not node.private_key_encrypted:
+                return False, "Node has no private key configured"
+            
+            config_data['private_key'] = node.private_key_encrypted
+            
+            # Add optional fields if they exist
+            if node.override_listen_port:
+                config_data['listen_port'] = node.override_listen_port
+            
+            if node.override_dns:
+                config_data['dns'] = node.override_dns
+            
+            if node.override_mtu:
+                config_data['mtu'] = node.override_mtu
+            
+            if node.post_up:
+                config_data['post_up'] = node.post_up
+            
+            if node.pre_down:
+                config_data['pre_down'] = node.pre_down
+            
+            # Note: Address will typically be set from ip_pool_cidr or similar
+            # For now, we don't automatically set it from the model
+            
+            # Send to agent
+            client = AgentClient(node.agent_url, node.secret_encrypted)
+            success, response = client.set_interface_config(node.wg_interface, config_data)
+            
+            if success:
+                _log_info(f"Successfully synced interface config for node {node_id}")
+                return True, "Interface configuration synchronized successfully"
+            else:
+                _log_error(f"Failed to sync interface config for node {node_id}: {response}")
+                return False, f"Failed to sync interface configuration: {response}"
+                
+        except Exception as e:
+            _log_error(f"Error syncing interface config for node {node_id}: {e}")
+            return False, str(e)
+    
+    def getNodeInterfaceConfig(self, node_id: str) -> Tuple[bool, Any]:
+        """
+        Get interface configuration from node (Phase 6)
+        Fetches the current interface configuration from the agent
+        
+        Args:
+            node_id: Node ID
+            
+        Returns:
+            Tuple of (success: bool, config_data or error_message)
+        """
+        try:
+            node = self.getNodeById(node_id)
+            if not node:
+                return False, "Node not found"
+            
+            if not node.wg_interface:
+                return False, "Node has no WireGuard interface configured"
+            
+            client = AgentClient(node.agent_url, node.secret_encrypted)
+            success, response = client.get_interface_config(node.wg_interface)
+            
+            if success:
+                _log_info(f"Successfully retrieved interface config for node {node_id}")
+                return True, response
+            else:
+                _log_error(f"Failed to get interface config for node {node_id}: {response}")
+                return False, response
+                
+        except Exception as e:
+            _log_error(f"Error getting interface config for node {node_id}: {e}")
+            return False, str(e)
+    
+    def enableNodeInterface(self, node_id: str) -> Tuple[bool, str]:
+        """
+        Enable (bring up) node interface (Phase 6)
+        
+        Args:
+            node_id: Node ID
+            
+        Returns:
+            Tuple of (success: bool, message)
+        """
+        try:
+            node = self.getNodeById(node_id)
+            if not node:
+                return False, "Node not found"
+            
+            if not node.wg_interface:
+                return False, "Node has no WireGuard interface configured"
+            
+            client = AgentClient(node.agent_url, node.secret_encrypted)
+            success, response = client.enable_interface(node.wg_interface)
+            
+            if success:
+                _log_info(f"Successfully enabled interface for node {node_id}")
+                return True, "Interface enabled successfully"
+            else:
+                _log_error(f"Failed to enable interface for node {node_id}: {response}")
+                return False, response
+                
+        except Exception as e:
+            _log_error(f"Error enabling interface for node {node_id}: {e}")
+            return False, str(e)
+    
+    def disableNodeInterface(self, node_id: str) -> Tuple[bool, str]:
+        """
+        Disable (bring down) node interface (Phase 6)
+        
+        Args:
+            node_id: Node ID
+            
+        Returns:
+            Tuple of (success: bool, message)
+        """
+        try:
+            node = self.getNodeById(node_id)
+            if not node:
+                return False, "Node not found"
+            
+            if not node.wg_interface:
+                return False, "Node has no WireGuard interface configured"
+            
+            client = AgentClient(node.agent_url, node.secret_encrypted)
+            success, response = client.disable_interface(node.wg_interface)
+            
+            if success:
+                _log_info(f"Successfully disabled interface for node {node_id}")
+                return True, "Interface disabled successfully"
+            else:
+                _log_error(f"Failed to disable interface for node {node_id}: {response}")
+                return False, response
+                
+        except Exception as e:
+            _log_error(f"Error disabling interface for node {node_id}: {e}")
+            return False, str(e)
+
