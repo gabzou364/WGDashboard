@@ -390,7 +390,13 @@ class Peer:
             return False
         now = datetime.datetime.now()
         if isinstance(self.expiry_date, str):
-            expiry = datetime.datetime.fromisoformat(self.expiry_date)
+            # Handle ISO format with optional 'Z' suffix
+            expiry_str = self.expiry_date.replace('Z', '+00:00') if self.expiry_date.endswith('Z') else self.expiry_date
+            try:
+                expiry = datetime.datetime.fromisoformat(expiry_str)
+            except ValueError:
+                # Fallback for older Python versions or non-standard formats
+                expiry = datetime.datetime.strptime(self.expiry_date.split('.')[0].replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
         else:
             expiry = self.expiry_date
         return now >= expiry
@@ -401,7 +407,13 @@ class Peer:
             return -1
         now = datetime.datetime.now()
         if isinstance(self.expiry_date, str):
-            expiry = datetime.datetime.fromisoformat(self.expiry_date)
+            # Handle ISO format with optional 'Z' suffix
+            expiry_str = self.expiry_date.replace('Z', '+00:00') if self.expiry_date.endswith('Z') else self.expiry_date
+            try:
+                expiry = datetime.datetime.fromisoformat(expiry_str)
+            except ValueError:
+                # Fallback for older Python versions or non-standard formats
+                expiry = datetime.datetime.strptime(self.expiry_date.split('.')[0].replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
         else:
             expiry = self.expiry_date
         delta = expiry - now

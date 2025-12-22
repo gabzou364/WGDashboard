@@ -75,51 +75,80 @@ export default {
 			// First save the regular peer settings
 			fetchPost(`/api/updatePeerSettings/${this.$route.params.id}`, this.data, (res) => {
 				if (res.status){
-					// Then update traffic limit if changed
+					// Track completion of additional API calls
+					let pendingCalls = 0;
+					let allSuccess = true;
+					
+					const checkCompletion = () => {
+						if (pendingCalls === 0) {
+							this.saving = false;
+							if (allSuccess) {
+								this.dashboardConfigurationStore.newMessage("Server", "Peer saved", "success")
+							}
+							this.$emit("refresh")
+						}
+					};
+					
+					// Update traffic limit if changed
 					if (this.trafficLimitBytes !== this.selectedPeer.traffic_limit) {
+						pendingCalls++;
 						fetchPost(`/api/updatePeerTrafficLimit/${this.$route.params.id}`, {
 							id: this.data.id,
 							traffic_limit: this.trafficLimitBytes
 						}, (limitRes) => {
+							pendingCalls--;
 							if (!limitRes.status) {
+								allSuccess = false;
 								this.dashboardConfigurationStore.newMessage("Server", 
-									`Peer saved but traffic limit update failed: ${limitRes.message}`, "warning")
+									`Traffic limit update failed: ${limitRes.message}`, "warning")
 							}
+							checkCompletion();
 						})
 					}
 					
-					// Then update expiry date if changed
+					// Update expiry date if changed
 					if (this.expiryDateISO !== this.selectedPeer.expiry_date) {
+						pendingCalls++;
 						fetchPost(`/api/updatePeerExpiryDate/${this.$route.params.id}`, {
 							id: this.data.id,
 							expiry_date: this.expiryDateISO
 						}, (expiryRes) => {
+							pendingCalls--;
 							if (!expiryRes.status) {
+								allSuccess = false;
 								this.dashboardConfigurationStore.newMessage("Server", 
-									`Peer saved but expiry date update failed: ${expiryRes.message}`, "warning")
+									`Expiry date update failed: ${expiryRes.message}`, "warning")
 							}
+							checkCompletion();
 						})
 					}
 					
 					// Update warning threshold if changed
 					if (this.data.traffic_warn_threshold !== this.selectedPeer.traffic_warn_threshold) {
+						pendingCalls++;
 						fetchPost(`/api/updatePeerTrafficWarningThreshold/${this.$route.params.id}`, {
 							id: this.data.id,
 							threshold: this.data.traffic_warn_threshold || 80
 						}, (thresholdRes) => {
+							pendingCalls--;
 							if (!thresholdRes.status) {
+								allSuccess = false;
 								this.dashboardConfigurationStore.newMessage("Server", 
-									`Peer saved but warning threshold update failed: ${thresholdRes.message}`, "warning")
+									`Warning threshold update failed: ${thresholdRes.message}`, "warning")
 							}
+							checkCompletion();
 						})
 					}
 					
-					this.dashboardConfigurationStore.newMessage("Server", "Peer saved", "success")
+					// If no additional calls, complete immediately
+					if (pendingCalls === 0) {
+						checkCompletion();
+					}
 				}else{
+					this.saving = false;
 					this.dashboardConfigurationStore.newMessage("Server", res.message, "danger")
+					this.$emit("refresh")
 				}
-				this.saving = false;
-				this.$emit("refresh")
 			})
 		},
 		resetPeerData(type){

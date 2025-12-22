@@ -42,9 +42,10 @@ export default {
 		},
 		trafficUsagePercent() {
 			if (!this.hasTrafficLimit) return 0;
-			const totalTraffic = (this.Peer.cumu_receive + this.Peer.cumu_sent + 
-			                     this.Peer.total_receive + this.Peer.total_sent) * 1073741824; // GB to bytes
-			return Math.min(100, (totalTraffic / this.Peer.traffic_limit) * 100);
+			const totalTrafficGB = this.Peer.cumu_receive + this.Peer.cumu_sent + 
+			                       this.Peer.total_receive + this.Peer.total_sent; // Already in GB
+			const totalTrafficBytes = totalTrafficGB * 1073741824; // Convert GB to bytes
+			return Math.min(100, (totalTrafficBytes / this.Peer.traffic_limit) * 100);
 		},
 		trafficLimitExceeded() {
 			return this.hasTrafficLimit && this.trafficUsagePercent >= 100;
