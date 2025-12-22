@@ -18,6 +18,12 @@ class Node:
         self.enabled = tableData.get("enabled", False)
         self.weight = tableData.get("weight", 100)
         self.max_peers = tableData.get("max_peers", 0)
+        # Per-node overrides (Phase 4)
+        self.override_listen_port = tableData.get("override_listen_port")
+        self.override_dns = tableData.get("override_dns")
+        self.override_mtu = tableData.get("override_mtu")
+        self.override_keepalive = tableData.get("override_keepalive")
+        self.override_endpoint_allowed_ip = tableData.get("override_endpoint_allowed_ip")
         self.last_seen = tableData.get("last_seen")
         self.health_json = tableData.get("health_json", "{}")
         self.created_at = tableData.get("created_at")
@@ -36,6 +42,11 @@ class Node:
             "enabled": self.enabled,
             "weight": self.weight,
             "max_peers": self.max_peers,
+            "override_listen_port": self.override_listen_port,
+            "override_dns": self.override_dns,
+            "override_mtu": self.override_mtu,
+            "override_keepalive": self.override_keepalive,
+            "override_endpoint_allowed_ip": self.override_endpoint_allowed_ip,
             "last_seen": self.last_seen.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen else None,
             "health_json": self.health_json,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
