@@ -41,9 +41,6 @@ class Peer:
         self.handshake_obs = tableData.get("handshake_obs")
         self.rx_obs = tableData.get("rx_obs")
         self.tx_obs = tableData.get("tx_obs")
-        self.traffic_limit = tableData.get("traffic_limit")
-        self.expiry_date = tableData.get("expiry_date")
-        self.traffic_warn_threshold = tableData.get("traffic_warn_threshold", 80)
         self.jobs: list[PeerJob] = []
         self.ShareLink: list[PeerShareLink] = []
         self.getJobs()
@@ -360,61 +357,3 @@ class Peer:
         hours, remainder = divmod(delta.total_seconds(), 3600)
         minutes, seconds = divmod(remainder, 60)
         return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
-    
-    def isTrafficLimitExceeded(self) -> bool:
-        """Check if peer has exceeded traffic limit (Phase 7)"""
-        if self.traffic_limit is None or self.traffic_limit <= 0:
-            return False
-        total_traffic = self.cumu_receive + self.cumu_sent
-        return total_traffic >= self.traffic_limit
-    
-    def isTrafficLimitWarning(self) -> bool:
-        """Check if peer is approaching traffic limit (Phase 7)"""
-        if self.traffic_limit is None or self.traffic_limit <= 0:
-            return False
-        threshold = self.traffic_warn_threshold if self.traffic_warn_threshold else 80
-        total_traffic = self.cumu_receive + self.cumu_sent
-        warning_threshold = (self.traffic_limit * threshold) / 100.0
-        return total_traffic >= warning_threshold and total_traffic < self.traffic_limit
-    
-    def getTrafficUsagePercentage(self) -> float:
-        """Get traffic usage as percentage of limit (Phase 7)"""
-        if self.traffic_limit is None or self.traffic_limit <= 0:
-            return 0.0
-        total_traffic = self.cumu_receive + self.cumu_sent
-        return min(100.0, (total_traffic / self.traffic_limit) * 100.0)
-    
-    def isExpired(self) -> bool:
-        """Check if peer has expired (Phase 7)"""
-        if self.expiry_date is None:
-            return False
-        now = datetime.datetime.now()
-        if isinstance(self.expiry_date, str):
-            # Handle ISO format with optional 'Z' suffix
-            expiry_str = self.expiry_date.replace('Z', '+00:00') if self.expiry_date.endswith('Z') else self.expiry_date
-            try:
-                expiry = datetime.datetime.fromisoformat(expiry_str)
-            except ValueError:
-                # Fallback for older Python versions or non-standard formats
-                expiry = datetime.datetime.strptime(self.expiry_date.split('.')[0].replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
-        else:
-            expiry = self.expiry_date
-        return now >= expiry
-    
-    def getDaysUntilExpiry(self) -> int:
-        """Get number of days until expiry (Phase 7)"""
-        if self.expiry_date is None:
-            return -1
-        now = datetime.datetime.now()
-        if isinstance(self.expiry_date, str):
-            # Handle ISO format with optional 'Z' suffix
-            expiry_str = self.expiry_date.replace('Z', '+00:00') if self.expiry_date.endswith('Z') else self.expiry_date
-            try:
-                expiry = datetime.datetime.fromisoformat(expiry_str)
-            except ValueError:
-                # Fallback for older Python versions or non-standard formats
-                expiry = datetime.datetime.strptime(self.expiry_date.split('.')[0].replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
-        else:
-            expiry = self.expiry_date
-        delta = expiry - now
-        return max(0, delta.days)

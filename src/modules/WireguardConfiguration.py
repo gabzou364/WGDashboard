@@ -260,9 +260,6 @@ class WireguardConfiguration:
             sqlalchemy.Column('handshake_obs', sqlalchemy.String(255), nullable=True),
             sqlalchemy.Column('rx_obs', sqlalchemy.Float, nullable=True),
             sqlalchemy.Column('tx_obs', sqlalchemy.Float, nullable=True),
-            sqlalchemy.Column('traffic_limit', sqlalchemy.BigInteger, nullable=True),
-            sqlalchemy.Column('expiry_date', sqlalchemy.DateTime, nullable=True),
-            sqlalchemy.Column('traffic_warn_threshold', sqlalchemy.Integer, nullable=True, default=80),
             extend_existing=True
         )
         self.peersRestrictedTable = sqlalchemy.Table(
@@ -291,9 +288,6 @@ class WireguardConfiguration:
             sqlalchemy.Column('handshake_obs', sqlalchemy.String(255), nullable=True),
             sqlalchemy.Column('rx_obs', sqlalchemy.Float, nullable=True),
             sqlalchemy.Column('tx_obs', sqlalchemy.Float, nullable=True),
-            sqlalchemy.Column('traffic_limit', sqlalchemy.BigInteger, nullable=True),
-            sqlalchemy.Column('expiry_date', sqlalchemy.DateTime, nullable=True),
-            sqlalchemy.Column('traffic_warn_threshold', sqlalchemy.Integer, nullable=True, default=80),
             extend_existing=True
         )
         self.peersTransferTable = sqlalchemy.Table(
@@ -342,9 +336,6 @@ class WireguardConfiguration:
             sqlalchemy.Column('preshared_key', sqlalchemy.String(255)),
             sqlalchemy.Column('node_id', sqlalchemy.String(255), nullable=True),
             sqlalchemy.Column('iface', sqlalchemy.String(50), nullable=True),
-            sqlalchemy.Column('traffic_limit', sqlalchemy.BigInteger, nullable=True),
-            sqlalchemy.Column('expiry_date', sqlalchemy.DateTime, nullable=True),
-            sqlalchemy.Column('traffic_warn_threshold', sqlalchemy.Integer, nullable=True, default=80),
             extend_existing=True
         )
         self.infoTable = sqlalchemy.Table(
@@ -889,48 +880,6 @@ class WireguardConfiguration:
     def getRestrictedPeersList(self) -> list:
         self.getRestrictedPeers()
         return self.RestrictedPeers
-    
-    def enforceTrafficLimits(self):
-        """Enforce traffic limits on peers (Phase 7)"""
-        try:
-            peers = self.getPeersList()
-            for peer in peers:
-                if peer.isTrafficLimitExceeded():
-                    current_app.logger.warning(
-                        f"[Phase 7] Peer {peer.name} ({peer.id[:16]}...) exceeded traffic limit. "
-                        f"Usage: {peer.cumu_receive + peer.cumu_sent} / {peer.traffic_limit} bytes"
-                    )
-                    # Restrict the peer
-                    self.restrictPeerAccess(peer.id)
-                elif peer.isTrafficLimitWarning():
-                    current_app.logger.info(
-                        f"[Phase 7] Peer {peer.name} ({peer.id[:16]}...) approaching traffic limit. "
-                        f"Usage: {peer.getTrafficUsagePercentage():.1f}%"
-                    )
-        except Exception as e:
-            current_app.logger.error(f"[Phase 7] Error enforcing traffic limits: {e}")
-    
-    def enforceExpiryDates(self):
-        """Enforce expiry dates on peers (Phase 7)"""
-        try:
-            peers = self.getPeersList()
-            for peer in peers:
-                if peer.isExpired():
-                    current_app.logger.warning(
-                        f"[Phase 7] Peer {peer.name} ({peer.id[:16]}...) has expired. "
-                        f"Expiry date: {peer.expiry_date}"
-                    )
-                    # Restrict the peer
-                    self.restrictPeerAccess(peer.id)
-                else:
-                    days_until_expiry = peer.getDaysUntilExpiry()
-                    if days_until_expiry >= 0 and days_until_expiry <= 7:
-                        current_app.logger.info(
-                            f"[Phase 7] Peer {peer.name} ({peer.id[:16]}...) expiring soon. "
-                            f"Days remaining: {days_until_expiry}"
-                        )
-        except Exception as e:
-            current_app.logger.error(f"[Phase 7] Error enforcing expiry dates: {e}")
 
     def toJson(self):
         self.Status = self.getStatus()
