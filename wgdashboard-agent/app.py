@@ -876,6 +876,49 @@ async def disable_interface(interface: str = Path(..., description="WireGuard in
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/v1/wg/{interface}")
+async def delete_interface(interface: str = Path(..., description="WireGuard interface name")):
+    """
+    Delete/remove a WireGuard interface (Phase 8)
+    This will:
+    1. Disable the interface if it's up
+    2. Remove the configuration file
+    """
+    try:
+        logger.info(f"Deleting interface {interface}")
+        
+        # First, try to disable the interface if it's up
+        try:
+            subprocess.run(['wg', 'show', interface], check=True, capture_output=True)
+            # Interface is up, disable it
+            subprocess.run(['wg-quick', 'down', interface], check=True, capture_output=True)
+            logger.info(f"Disabled interface {interface}")
+        except subprocess.CalledProcessError:
+            # Interface is already down or doesn't exist
+            logger.info(f"Interface {interface} is not running")
+        
+        # Remove the configuration file
+        import os
+        config_path = f"/etc/wireguard/{interface}.conf"
+        if os.path.exists(config_path):
+            os.remove(config_path)
+            logger.info(f"Removed configuration file {config_path}")
+        else:
+            logger.warning(f"Configuration file {config_path} not found")
+        
+        return {
+            'status': 'success',
+            'message': f'Interface {interface} deleted successfully'
+        }
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to delete interface {interface}: {e.stderr.decode() if e.stderr else str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete interface: {e.stderr.decode() if e.stderr else str(e)}")
+    except Exception as e:
+        logger.error(f"Error deleting interface {interface}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Exception handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):

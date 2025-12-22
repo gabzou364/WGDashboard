@@ -86,6 +86,9 @@ class DashboardConfig:
             },
             "WireGuardConfiguration": {
                 "autostart": ""
+            },
+            "Cloudflare": {
+                "api_token": ""
             }
         }
 

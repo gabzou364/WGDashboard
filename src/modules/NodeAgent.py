@@ -261,4 +261,18 @@ class AgentClient:
             Tuple of (success: bool, response_data or error_message)
         """
         return self._make_request('POST', f'/v1/wg/{iface}/disable')
+    
+    def delete_interface(self, iface: str) -> Tuple[bool, Any]:
+        """
+        Delete/remove a WireGuard interface (Phase 8)
+        This will disable the interface and remove its configuration file
+        
+        Args:
+            iface: WireGuard interface name
+            
+        Returns:
+            Tuple of (success: bool, response_data or error_message)
+        """
+        return self._make_request('DELETE', f'/v1/wg/{iface}')
+
 
