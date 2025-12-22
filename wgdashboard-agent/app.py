@@ -13,7 +13,7 @@ import base64
 import logging
 from typing import Optional, List
 from fastapi import FastAPI, Request, HTTPException, Path, Body
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -50,10 +50,10 @@ class SyncconfRequest(BaseModel):
 # Middleware for HMAC authentication
 @app.middleware("http")
 async def verify_hmac_signature(request: Request, call_next):
-    """Verify HMAC signature on all requests except health check"""
+    """Verify HMAC signature on all requests except health check and metrics"""
     
-    # Skip auth for health check
-    if request.url.path == "/health":
+    # Skip auth for health check and metrics endpoints
+    if request.url.path in ["/health", "/v1/metrics"]:
         return await call_next(request)
     
     # Get headers
@@ -124,6 +124,227 @@ async def health_check():
         "uptime": int(uptime),
         "version": "2.0.0"
     }
+
+
+# Observability Endpoints (Phase 5)
+@app.get("/v1/status")
+async def get_status():
+    """
+    Get detailed status report including peer counts, memory, CPU usage, and interface statuses.
+    Used for observability systems and real-time health monitoring.
+    """
+    try:
+        import psutil
+        
+        # Get system metrics
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        # Get network info
+        net_io = psutil.net_io_counters()
+        
+        # Get WireGuard interfaces
+        interfaces_status = {}
+        try:
+            # List all WireGuard interfaces
+            wg_output = subprocess.check_output(['wg', 'show', 'interfaces'], stderr=subprocess.STDOUT).decode('utf-8')
+            interfaces = wg_output.strip().split()
+            
+            for iface in interfaces:
+                try:
+                    # Get interface status
+                    dump_output = subprocess.check_output(
+                        ['wg', 'show', iface, 'dump'],
+                        stderr=subprocess.STDOUT
+                    ).decode('utf-8')
+                    
+                    lines = dump_output.strip().split('\n')
+                    peer_count = len(lines) - 1  # Subtract header line
+                    
+                    # Count active peers (those with recent handshake)
+                    active_peers = 0
+                    total_rx = 0
+                    total_tx = 0
+                    current_time = int(time.time())
+                    
+                    for line in lines[1:]:  # Skip header
+                        parts = line.split('\t')
+                        if len(parts) >= 8:
+                            latest_handshake = int(parts[4]) if parts[4] != '0' else 0
+                            # Consider peer active if handshake within last 3 minutes
+                            if latest_handshake > 0 and (current_time - latest_handshake) < 180:
+                                active_peers += 1
+                            total_rx += int(parts[5])
+                            total_tx += int(parts[6])
+                    
+                    interfaces_status[iface] = {
+                        'status': 'up',
+                        'peer_count': peer_count,
+                        'active_peers': active_peers,
+                        'total_rx_bytes': total_rx,
+                        'total_tx_bytes': total_tx
+                    }
+                except subprocess.CalledProcessError:
+                    interfaces_status[iface] = {
+                        'status': 'error',
+                        'peer_count': 0,
+                        'active_peers': 0
+                    }
+        except subprocess.CalledProcessError:
+            pass  # No WireGuard interfaces
+        
+        # Get uptime
+        try:
+            with open('/proc/uptime', 'r') as f:
+                uptime = float(f.readline().split()[0])
+        except:
+            uptime = 0
+        
+        return {
+            'status': 'ok',
+            'timestamp': int(time.time()),
+            'uptime': int(uptime),
+            'version': '2.1.0',
+            'system': {
+                'cpu_percent': round(cpu_percent, 2),
+                'memory': {
+                    'total': memory.total,
+                    'available': memory.available,
+                    'percent': memory.percent,
+                    'used': memory.used
+                },
+                'disk': {
+                    'total': disk.total,
+                    'used': disk.used,
+                    'free': disk.free,
+                    'percent': disk.percent
+                },
+                'network': {
+                    'bytes_sent': net_io.bytes_sent,
+                    'bytes_recv': net_io.bytes_recv,
+                    'packets_sent': net_io.packets_sent,
+                    'packets_recv': net_io.packets_recv
+                }
+            },
+            'wireguard': {
+                'interfaces': interfaces_status,
+                'interface_count': len(interfaces_status)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/metrics")
+async def get_metrics():
+    """
+    Expose WireGuard and system-level metrics in Prometheus-compatible format.
+    Used for observability systems like Prometheus/Grafana.
+    """
+    try:
+        import psutil
+        
+        metrics = []
+        
+        # System metrics
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        metrics.append(f'# HELP wgdashboard_agent_cpu_percent CPU usage percentage')
+        metrics.append(f'# TYPE wgdashboard_agent_cpu_percent gauge')
+        metrics.append(f'wgdashboard_agent_cpu_percent {cpu_percent}')
+        
+        metrics.append(f'# HELP wgdashboard_agent_memory_used_bytes Memory used in bytes')
+        metrics.append(f'# TYPE wgdashboard_agent_memory_used_bytes gauge')
+        metrics.append(f'wgdashboard_agent_memory_used_bytes {memory.used}')
+        
+        metrics.append(f'# HELP wgdashboard_agent_memory_percent Memory usage percentage')
+        metrics.append(f'# TYPE wgdashboard_agent_memory_percent gauge')
+        metrics.append(f'wgdashboard_agent_memory_percent {memory.percent}')
+        
+        metrics.append(f'# HELP wgdashboard_agent_disk_used_bytes Disk used in bytes')
+        metrics.append(f'# TYPE wgdashboard_agent_disk_used_bytes gauge')
+        metrics.append(f'wgdashboard_agent_disk_used_bytes {disk.used}')
+        
+        # Get WireGuard interfaces and metrics
+        try:
+            wg_output = subprocess.check_output(['wg', 'show', 'interfaces'], stderr=subprocess.STDOUT).decode('utf-8')
+            interfaces = wg_output.strip().split()
+            
+            metrics.append(f'# HELP wireguard_interface_count Number of WireGuard interfaces')
+            metrics.append(f'# TYPE wireguard_interface_count gauge')
+            metrics.append(f'wireguard_interface_count {len(interfaces)}')
+            
+            for iface in interfaces:
+                try:
+                    dump_output = subprocess.check_output(
+                        ['wg', 'show', iface, 'dump'],
+                        stderr=subprocess.STDOUT
+                    ).decode('utf-8')
+                    
+                    lines = dump_output.strip().split('\n')
+                    peer_count = len(lines) - 1
+                    
+                    metrics.append(f'# HELP wireguard_peers_total Total number of peers on interface')
+                    metrics.append(f'# TYPE wireguard_peers_total gauge')
+                    metrics.append(f'wireguard_peers_total{{interface="{iface}"}} {peer_count}')
+                    
+                    # Parse peer data
+                    active_peers = 0
+                    total_rx = 0
+                    total_tx = 0
+                    current_time = int(time.time())
+                    
+                    for line in lines[1:]:
+                        parts = line.split('\t')
+                        if len(parts) >= 8:
+                            public_key = parts[0][:16]  # Truncate for label
+                            latest_handshake = int(parts[4]) if parts[4] != '0' else 0
+                            transfer_rx = int(parts[5])
+                            transfer_tx = int(parts[6])
+                            
+                            # Count active peers
+                            if latest_handshake > 0 and (current_time - latest_handshake) < 180:
+                                active_peers += 1
+                            
+                            total_rx += transfer_rx
+                            total_tx += transfer_tx
+                            
+                            # Per-peer metrics (optional, can be commented out for large deployments)
+                            metrics.append(f'wireguard_peer_receive_bytes_total{{interface="{iface}",public_key="{public_key}"}} {transfer_rx}')
+                            metrics.append(f'wireguard_peer_transmit_bytes_total{{interface="{iface}",public_key="{public_key}"}} {transfer_tx}')
+                            
+                            if latest_handshake > 0:
+                                seconds_since = current_time - latest_handshake
+                                metrics.append(f'wireguard_peer_last_handshake_seconds{{interface="{iface}",public_key="{public_key}"}} {seconds_since}')
+                    
+                    metrics.append(f'# HELP wireguard_peers_active Active peers (handshake within 3 minutes)')
+                    metrics.append(f'# TYPE wireguard_peers_active gauge')
+                    metrics.append(f'wireguard_peers_active{{interface="{iface}"}} {active_peers}')
+                    
+                    metrics.append(f'# HELP wireguard_interface_receive_bytes_total Total bytes received on interface')
+                    metrics.append(f'# TYPE wireguard_interface_receive_bytes_total counter')
+                    metrics.append(f'wireguard_interface_receive_bytes_total{{interface="{iface}"}} {total_rx}')
+                    
+                    metrics.append(f'# HELP wireguard_interface_transmit_bytes_total Total bytes transmitted on interface')
+                    metrics.append(f'# TYPE wireguard_interface_transmit_bytes_total counter')
+                    metrics.append(f'wireguard_interface_transmit_bytes_total{{interface="{iface}"}} {total_tx}')
+                    
+                except subprocess.CalledProcessError:
+                    pass
+        except subprocess.CalledProcessError:
+            pass
+        
+        # Return in Prometheus text format
+        return PlainTextResponse('\n'.join(metrics) + '\n', media_type='text/plain; version=0.0.4')
+        
+    except Exception as e:
+        logger.error(f"Error getting metrics: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # WireGuard Operations

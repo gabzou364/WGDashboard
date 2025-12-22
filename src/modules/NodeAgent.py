@@ -107,6 +107,24 @@ class AgentClient:
         """
         return self._make_request('GET', '/health')
 
+    def get_status(self) -> Tuple[bool, Any]:
+        """
+        Get detailed status report including peer counts, memory, CPU usage, and interface statuses (Phase 5)
+        
+        Returns:
+            Tuple of (success: bool, status_data or error_message)
+        """
+        return self._make_request('GET', '/v1/status')
+    
+    def get_metrics(self) -> Tuple[bool, Any]:
+        """
+        Get Prometheus-compatible metrics for observability systems (Phase 5)
+        
+        Returns:
+            Tuple of (success: bool, metrics_text or error_message)
+        """
+        return self._make_request('GET', '/v1/metrics')
+
     def get_wg_dump(self, iface: str) -> Tuple[bool, Any]:
         """
         Get WireGuard interface dump (peer stats)
