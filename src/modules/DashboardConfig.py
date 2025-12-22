@@ -174,6 +174,10 @@ class DashboardConfig:
                                    db.Column('override_mtu', db.Integer, nullable=True),
                                    db.Column('override_keepalive', db.Integer, nullable=True),
                                    db.Column('override_endpoint_allowed_ip', db.Text, nullable=True),
+                                   # Interface-level configuration (Phase 6)
+                                   db.Column('private_key_encrypted', db.Text, nullable=True),
+                                   db.Column('post_up', db.Text, nullable=True),
+                                   db.Column('pre_down', db.Text, nullable=True),
                                    db.Column('last_seen', 
                                             (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP)),
                                    db.Column('health_json', db.Text),

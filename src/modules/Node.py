@@ -26,6 +26,10 @@ class Node:
         self.override_mtu = tableData.get("override_mtu")
         self.override_keepalive = tableData.get("override_keepalive")
         self.override_endpoint_allowed_ip = tableData.get("override_endpoint_allowed_ip")
+        # Interface-level configuration (Phase 6)
+        self.private_key_encrypted = tableData.get("private_key_encrypted")
+        self.post_up = tableData.get("post_up")
+        self.pre_down = tableData.get("pre_down")
         self.last_seen = tableData.get("last_seen")
         self.health_json = tableData.get("health_json", "{}")
         self.created_at = tableData.get("created_at")
@@ -50,6 +54,9 @@ class Node:
             "override_mtu": self.override_mtu,
             "override_keepalive": self.override_keepalive,
             "override_endpoint_allowed_ip": self.override_endpoint_allowed_ip,
+            "private_key_encrypted": self.private_key_encrypted,
+            "post_up": self.post_up,
+            "pre_down": self.pre_down,
             "last_seen": self.last_seen.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen else None,
             "health_json": self.health_json,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,

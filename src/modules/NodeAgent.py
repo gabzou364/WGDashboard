@@ -202,3 +202,63 @@ class AgentClient:
             return True, "Connection successful"
         else:
             return False, f"Connection failed: {result}"
+    
+    # Interface-Level Configuration Management (Phase 6)
+    
+    def get_interface_config(self, iface: str) -> Tuple[bool, Any]:
+        """
+        Get full WireGuard interface configuration (Phase 6)
+        
+        Args:
+            iface: WireGuard interface name
+            
+        Returns:
+            Tuple of (success: bool, config_data or error_message)
+        """
+        return self._make_request('GET', f'/v1/wg/{iface}/config')
+    
+    def set_interface_config(self, iface: str, config_data: Dict[str, Any]) -> Tuple[bool, Any]:
+        """
+        Replace WireGuard interface configuration (Phase 6)
+        
+        Args:
+            iface: WireGuard interface name
+            config_data: Interface configuration data including:
+                - private_key: WireGuard private key (required)
+                - listen_port: UDP port (optional)
+                - address: Interface IP address(es) (optional)
+                - post_up: Commands to run after interface is up (optional)
+                - pre_down: Commands to run before interface goes down (optional)
+                - mtu: MTU for interface (optional)
+                - dns: DNS servers (optional)
+                - table: Routing table (optional)
+            
+        Returns:
+            Tuple of (success: bool, response_data or error_message)
+        """
+        return self._make_request('PUT', f'/v1/wg/{iface}/config', config_data)
+    
+    def enable_interface(self, iface: str) -> Tuple[bool, Any]:
+        """
+        Bring WireGuard interface up (Phase 6)
+        
+        Args:
+            iface: WireGuard interface name
+            
+        Returns:
+            Tuple of (success: bool, response_data or error_message)
+        """
+        return self._make_request('POST', f'/v1/wg/{iface}/enable')
+    
+    def disable_interface(self, iface: str) -> Tuple[bool, Any]:
+        """
+        Bring WireGuard interface down (Phase 6)
+        
+        Args:
+            iface: WireGuard interface name
+            
+        Returns:
+            Tuple of (success: bool, response_data or error_message)
+        """
+        return self._make_request('POST', f'/v1/wg/{iface}/disable')
+
