@@ -130,6 +130,14 @@ const router = createRouter({
 					}
 				},
 				{
+					name: "Traffic",
+					path: 'traffic',
+					component: () => import("@/views/traffic.vue"),
+					meta: {
+						title: "Traffic Monitoring"
+					}
+				},
+				{
 					name: "Clients",
 					path: 'clients',
 					component: () => import("@/views/clients.vue"),
