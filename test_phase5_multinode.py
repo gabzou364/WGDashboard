@@ -213,6 +213,105 @@ def test_agent_client_methods():
         return False
 
 
+def test_node_grouping():
+    """Test node grouping functionality"""
+    print("\nTesting Node Grouping...")
+    try:
+        # Mock sqlalchemy before importing NodeGroupsManager
+        import sys
+        sys.modules['sqlalchemy'] = MagicMock()
+        
+        from NodeGroupsManager import NodeGroupsManager
+        from NodeGroup import NodeGroup
+        from Node import Node
+        
+        # Mock DashboardConfig
+        mock_config = MagicMock()
+        mock_config.engine = MagicMock()
+        
+        # Mock tables
+        mock_config.nodeGroupsTable = MagicMock()
+        mock_config.nodesTable = MagicMock()
+        
+        # Create manager
+        manager = NodeGroupsManager(mock_config)
+        
+        # Mock group data
+        group_data = {
+            'id': 'group-1',
+            'name': 'US-East',
+            'description': 'US East Coast nodes',
+            'region': 'us-east',
+            'priority': 10
+        }
+        
+        # Test creating a group (mock the database response)
+        with patch.object(manager, 'getGroupByName', return_value=None):
+            with patch.object(mock_config.engine, 'begin'):
+                with patch.object(manager, 'getGroupById', return_value=NodeGroup(group_data)):
+                    success, msg, group = manager.createGroup('US-East', 'US East Coast nodes', 'us-east', 10)
+                    
+                    assert success is True
+                    assert group is not None
+                    assert group.name == 'US-East'
+                    assert group.region == 'us-east'
+        
+        print("✓ Node grouping functionality works")
+        return True
+    except Exception as e:
+        print(f"✗ Node grouping test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def test_nodes_with_groups():
+    """Test node assignment to groups"""
+    print("\nTesting Node assignment to groups...")
+    try:
+        from Node import Node
+        
+        # Test node with group_id
+        node_data = {
+            'id': 'node-1',
+            'name': 'Node 1',
+            'agent_url': 'http://node1:8080',
+            'enabled': True,
+            'group_id': 'group-123',
+            'weight': 100,
+            'max_peers': 100,
+            'wg_interface': 'wg0',
+            'secret_encrypted': 'test',
+            'auth_type': 'hmac',
+            'endpoint': 'node1.example.com:51820',
+            'ip_pool_cidr': '10.0.1.0/24'
+        }
+        
+        node = Node(node_data)
+        
+        # Verify group_id is set
+        assert node.group_id == 'group-123'
+        
+        # Verify toJson includes group_id
+        json_data = node.toJson()
+        assert 'group_id' in json_data
+        assert json_data['group_id'] == 'group-123'
+        
+        # Test node without group_id (ungrouped)
+        node_data_no_group = node_data.copy()
+        node_data_no_group['group_id'] = None
+        node_no_group = Node(node_data_no_group)
+        assert node_no_group.group_id is None
+        
+        print("✓ Node group assignment works")
+        return True
+    except Exception as e:
+        print(f"✗ Node group assignment test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def main():
     """Run all tests"""
     print("="*60)
@@ -224,6 +323,8 @@ def main():
         test_agent_status_endpoint,
         test_agent_metrics_endpoint,
         test_node_selector_with_metrics,
+        test_node_grouping,
+        test_nodes_with_groups,
     ]
     
     results = []

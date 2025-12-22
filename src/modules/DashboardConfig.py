@@ -98,6 +98,7 @@ class DashboardConfig:
         self.engine = db.create_engine(ConnectionString('wgdashboard'))
         self.dbMetadata = db.MetaData()
         self.__createAPIKeyTable()
+        self.__createNodeGroupsTable()
         self.__createNodesTable()
         self.__createIPAllocationsTable()
         self.DashboardAPIKeys = self.__getAPIKeys()
@@ -133,6 +134,24 @@ class DashboardConfig:
                                     )
         self.dbMetadata.create_all(self.engine)
     
+    def __createNodeGroupsTable(self):
+        """Create node groups table for organizing nodes (Phase 5)"""
+        self.nodeGroupsTable = db.Table('NodeGroups', self.dbMetadata,
+                                       db.Column('id', db.String(255), nullable=False, primary_key=True),
+                                       db.Column('name', db.String(255), nullable=False, unique=True),
+                                       db.Column('description', db.Text, nullable=True),
+                                       db.Column('region', db.String(100), nullable=True),
+                                       db.Column('priority', db.Integer, server_default='0'),
+                                       db.Column('created_at',
+                                                (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                server_default=db.func.now()),
+                                       db.Column('updated_at',
+                                                (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                server_default=db.func.now(),
+                                                onupdate=db.func.now())
+                                       )
+        self.dbMetadata.create_all(self.engine)
+    
     def __createNodesTable(self):
         """Create nodes table for multi-node architecture"""
         self.nodesTable = db.Table('Nodes', self.dbMetadata,
@@ -147,6 +166,8 @@ class DashboardConfig:
                                    db.Column('enabled', db.Boolean, server_default='1'),
                                    db.Column('weight', db.Integer, server_default='100'),
                                    db.Column('max_peers', db.Integer, server_default='0'),
+                                   # Node grouping (Phase 5)
+                                   db.Column('group_id', db.String(255), nullable=True),
                                    # Per-node overrides (Phase 4)
                                    db.Column('override_listen_port', db.Integer, nullable=True),
                                    db.Column('override_dns', db.String(255), nullable=True),

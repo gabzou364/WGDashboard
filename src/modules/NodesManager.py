@@ -93,6 +93,72 @@ class NodesManager:
             _log_error(f"Error getting enabled nodes: {e}")
             return []
     
+    def getNodesByGroup(self, group_id: Optional[str]) -> List[Node]:
+        """
+        Get nodes in a specific group (Phase 5)
+        
+        Args:
+            group_id: Group ID to filter by (None for ungrouped nodes)
+        
+        Returns:
+            List of nodes in the group
+        """
+        try:
+            with self.engine.connect() as conn:
+                if group_id is None:
+                    # Get ungrouped nodes
+                    result = conn.execute(
+                        self.nodesTable.select().where(self.nodesTable.c.group_id.is_(None))
+                    ).mappings().fetchall()
+                else:
+                    # Get nodes in specific group
+                    result = conn.execute(
+                        self.nodesTable.select().where(self.nodesTable.c.group_id == group_id)
+                    ).mappings().fetchall()
+                nodes = []
+                for row in result:
+                    nodes.append(Node(dict(row)))
+                return nodes
+        except Exception as e:
+            _log_error(f"Error getting nodes by group {group_id}: {e}")
+            return []
+    
+    def getEnabledNodesByGroup(self, group_id: Optional[str]) -> List[Node]:
+        """
+        Get enabled nodes in a specific group (Phase 5)
+        
+        Args:
+            group_id: Group ID to filter by (None for ungrouped nodes)
+        
+        Returns:
+            List of enabled nodes in the group
+        """
+        try:
+            with self.engine.connect() as conn:
+                if group_id is None:
+                    # Get ungrouped enabled nodes
+                    result = conn.execute(
+                        self.nodesTable.select().where(
+                            (self.nodesTable.c.enabled == True) & 
+                            (self.nodesTable.c.group_id.is_(None))
+                        )
+                    ).mappings().fetchall()
+                else:
+                    # Get enabled nodes in specific group
+                    result = conn.execute(
+                        self.nodesTable.select().where(
+                            (self.nodesTable.c.enabled == True) & 
+                            (self.nodesTable.c.group_id == group_id)
+                        )
+                    ).mappings().fetchall()
+                nodes = []
+                for row in result:
+                    nodes.append(Node(dict(row)))
+                return nodes
+        except Exception as e:
+            _log_error(f"Error getting enabled nodes by group {group_id}: {e}")
+            return []
+    
     def createNode(self, name: str, agent_url: str, wg_interface: str,
                    endpoint: str, ip_pool_cidr: str, 
                    secret: Optional[str] = None,
@@ -162,6 +228,7 @@ class NodesManager:
             update_values = {}
             allowed_fields = ['name', 'agent_url', 'wg_interface', 'endpoint', 
                             'ip_pool_cidr', 'weight', 'max_peers', 'enabled',
+                            'group_id',  # Phase 5
                             'override_listen_port', 'override_dns', 'override_mtu',
                             'override_keepalive', 'override_endpoint_allowed_ip']
             
