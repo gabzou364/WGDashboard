@@ -1,0 +1,31 @@
+[Unit]
+Description=WireGuard Dashboard Node Agent
+After=network.target wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/wg-agent
+ExecStart=/usr/bin/python3 /opt/wg-agent/wg-agent.py
+
+# Environment
+Environment="WG_AGENT_SECRET=your-secret-here"
+Environment="WG_AGENT_PORT=8080"
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Restart policy
+Restart=on-failure
+RestartSec=10s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wg-agent
+
+[Install]
+WantedBy=multi-user.target
