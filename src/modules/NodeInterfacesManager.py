@@ -138,11 +138,23 @@ class NodeInterfacesManager:
             if not node_id or not interface_name:
                 return False, "Node ID and interface name are required"
             
-            # Check if interface already exists for this node
-            existing = self.getInterfacesByNodeId(node_id)
-            for iface in existing:
-                if iface.interface_name == interface_name:
-                    return False, f"Interface {interface_name} already exists for this node"
+            # Check if interface already exists for this node using database query
+            try:
+                with self.engine.connect() as conn:
+                    existing = conn.execute(
+                        self.nodeInterfacesTable.select().where(
+                            db.and_(
+                                self.nodeInterfacesTable.c.node_id == node_id,
+                                self.nodeInterfacesTable.c.interface_name == interface_name
+                            )
+                        )
+                    ).fetchone()
+                    
+                    if existing:
+                        return False, f"Interface {interface_name} already exists for this node"
+            except Exception as e:
+                _log_error(f"Error checking existing interface: {e}")
+                return False, str(e)
             
             # Generate interface ID
             interface_id = str(uuid.uuid4())

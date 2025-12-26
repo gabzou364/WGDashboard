@@ -2083,7 +2083,14 @@ def API_GetNode(node_id):
 
 @app.post(f'{APP_PREFIX}/api/nodes')
 def API_CreateNode():
-    """Create a new node"""
+    """Create a new node
+    
+    Supports two modes:
+    1. Legacy mode: Provide wg_interface, endpoint, ip_pool_cidr (backward compatible)
+    2. New mode: Provide interfaces array with multiple interface definitions
+    
+    At least one interface must be defined through either approach.
+    """
     try:
         data = request.get_json()
         required_fields = ['name', 'agent_url']

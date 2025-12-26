@@ -40,8 +40,8 @@ class NodeInterface:
             "dns": self.dns,
             "table": self.table,
             "enabled": self.enabled,
-            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
-            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if isinstance(self.created_at, datetime) else self.created_at,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if isinstance(self.updated_at, datetime) else self.updated_at,
         }
 
     def __repr__(self):

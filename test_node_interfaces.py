@@ -55,7 +55,7 @@ def test_nodeinterface_model():
         assert interface.node_id == "test-node-1", "Node ID mismatch"
         assert interface.interface_name == "wg0", "Interface name mismatch"
         assert interface.endpoint == "vpn.example.com:51820", "Endpoint mismatch"
-        assert interface.enabled == True, "Enabled mismatch"
+        assert interface.enabled is True, "Enabled mismatch"
         
         # Test JSON serialization
         json_data = interface.toJson()
