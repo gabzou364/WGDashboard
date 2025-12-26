@@ -13,11 +13,11 @@
 WGDashboard uses npm workspaces to manage multiple frontend applications. To install all dependencies:
 
 ```bash
-# Install all dependencies for both app and client
+# Install dependencies for root package and all workspaces (app and client)
 npm install
 ```
 
-This will install dependencies for:
+This single command will automatically install dependencies for:
 - Root package management
 - `src/static/app` - Main dashboard application
 - `src/static/client` - Client application

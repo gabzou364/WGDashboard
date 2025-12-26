@@ -8,7 +8,6 @@
     "src/static/client"
   ],
   "scripts": {
-    "install:all": "npm install && npm install --workspace=src/static/app && npm install --workspace=src/static/client",
     "build": "npm run build --workspace=src/static/app && npm run build --workspace=src/static/client",
     "build:app": "npm run build --workspace=src/static/app",
     "build:client": "npm run build --workspace=src/static/client",
