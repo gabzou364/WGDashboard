@@ -114,6 +114,30 @@ const router = createRouter({
 					}
 				},
 				{
+					name: "Cloudflare",
+					path: 'cloudflare',
+					component: () => import("@/views/cloudflare.vue"),
+					meta: {
+						title: "Cloudflare DNS Management"
+					}
+				},
+				{
+					name: "Logs",
+					path: 'logs',
+					component: () => import("@/views/logs.vue"),
+					meta: {
+						title: "System Logs"
+					}
+				},
+				{
+					name: "Traffic",
+					path: 'traffic',
+					component: () => import("@/views/traffic.vue"),
+					meta: {
+						title: "Traffic Monitoring"
+					}
+				},
+				{
 					name: "Clients",
 					path: 'clients',
 					component: () => import("@/views/clients.vue"),

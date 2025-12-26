@@ -1943,6 +1943,52 @@ def API_WebHooks_GetWebHookSessions():
     
 
 '''
+Dashboard Overview API Routes
+'''
+
+@app.get(f'{APP_PREFIX}/api/dashboard/cluster-overview')
+def API_GetClusterOverview():
+    """Get cluster overview information for dashboard"""
+    try:
+        cluster_data = []
+        
+        # Get all configurations
+        for config_name in WireguardConfigurations.keys():
+            config = WireguardConfigurations.get(config_name)
+            if not config:
+                continue
+            
+            # Get nodes assigned to this config
+            config_nodes = ConfigNodesManager.getNodesForConfig(config_name)
+            
+            # Only include configs with nodes assigned (cluster configs)
+            if len(config_nodes) > 0:
+                # Get endpoint group info
+                endpoint_group = EndpointGroupsManager.getEndpointGroup(config_name)
+                endpoint = endpoint_group.domain + ":" + str(endpoint_group.port) if endpoint_group else None
+                
+                # Check cluster health
+                healthy_nodes = [cn for cn in config_nodes if cn.is_healthy]
+                is_healthy = len(healthy_nodes) > 0
+                
+                # Get peer count for this config
+                peer_count = len(config.getPeers())
+                
+                cluster_data.append({
+                    'config_name': config_name,
+                    'node_count': len(config_nodes),
+                    'peer_count': peer_count,
+                    'endpoint': endpoint,
+                    'is_healthy': is_healthy,
+                    'healthy_node_count': len(healthy_nodes)
+                })
+        
+        return ResponseObject(data=cluster_data)
+    except Exception as e:
+        app.logger.error(f"Error getting cluster overview: {e}")
+        return ResponseObject(False, "Failed to get cluster overview", data=[])
+
+'''
 Nodes Management API Routes
 '''
 
@@ -2519,6 +2565,74 @@ def API_GetEndpointGroup(config_name):
     except Exception as e:
         app.logger.error(f"Error getting endpoint group: {e}")
         return ResponseObject(False, "Failed to get endpoint group", status_code=500)
+
+
+@app.post(f'{APP_PREFIX}/api/configs/<config_name>/sync-dns')
+def API_SyncDNS(config_name):
+    """Manually trigger DNS sync for a configuration"""
+    try:
+        # Get endpoint group
+        endpoint_group = EndpointGroupsManager.getEndpointGroup(config_name)
+        if not endpoint_group:
+            return ResponseObject(False, "No endpoint group configured for this configuration")
+        
+        # Get Cloudflare API token
+        cloudflare_token = DashboardConfig.GetConfig("Cloudflare", "api_token")[1]
+        if not cloudflare_token:
+            return ResponseObject(False, "Cloudflare API token not configured")
+        
+        # Get nodes for this config
+        config_nodes = ConfigNodesManager.getNodesForConfig(config_name)
+        if not config_nodes:
+            return ResponseObject(False, "No nodes assigned to this configuration")
+        
+        # Filter to healthy nodes if configured
+        nodes_to_publish = config_nodes
+        if endpoint_group.publish_only_healthy:
+            nodes_to_publish = ConfigNodesManager.getHealthyNodesForConfig(config_name)
+        
+        if len(nodes_to_publish) < endpoint_group.min_nodes:
+            return ResponseObject(False, f"Not enough healthy nodes (min: {endpoint_group.min_nodes})")
+        
+        # Extract IPs from node endpoints
+        node_ips = []
+        for cn in nodes_to_publish:
+            node = NodesManager.getNodeById(cn.node_id)
+            if node and node.endpoint:
+                # Parse endpoint to get IP (format: ip:port or domain:port)
+                endpoint_parts = node.endpoint.split(':')
+                if endpoint_parts:
+                    node_ips.append(endpoint_parts[0])
+        
+        if not node_ips:
+            return ResponseObject(False, "No valid node IPs found")
+        
+        # Sync DNS
+        CloudflareDNSManager.setAPIToken(cloudflare_token)
+        success, message = CloudflareDNSManager.sync_node_ips_to_dns(
+            endpoint_group.cloudflare_zone_id,
+            endpoint_group.cloudflare_record_name,
+            node_ips,
+            endpoint_group.ttl
+        )
+        
+        if success:
+            # Log audit entry
+            AuditLogManager.log(
+                action="dns_updated",
+                entity_type="endpoint_group",
+                entity_id=config_name,
+                details=json.dumps({"ips": node_ips, "record": endpoint_group.cloudflare_record_name}),
+                user=session.get("username", "system")
+            )
+            return ResponseObject(True, "DNS records synchronized successfully")
+        else:
+            return ResponseObject(False, f"DNS sync failed: {message}")
+            
+    except Exception as e:
+        app.logger.error(f"Error syncing DNS: {e}")
+        traceback.print_exc()
+        return ResponseObject(False, f"Failed to sync DNS: {str(e)}")
 
 
 @app.get(f'{APP_PREFIX}/api/audit-logs')
