@@ -1138,6 +1138,36 @@ def API_addPeers(configName):
                 if selected_node:
                     # Create peer via node agent
                     try:
+                        # Select appropriate interface for this node
+                        # Priority:
+                        # 1. Interface specified by user (if added to API in future)
+                        # 2. Interface with available IPs in its pool
+                        # 3. First enabled interface
+                        # 4. Fallback to legacy wg_interface field
+                        
+                        selected_interface = None
+                        interface_name = None
+                        interface_endpoint = None
+                        
+                        # Get enabled interfaces for this node
+                        node_interfaces = NodeInterfacesManager.getEnabledInterfacesByNodeId(selected_node_id)
+                        
+                        if node_interfaces:
+                            # For now, select the first enabled interface
+                            # TODO: Implement smarter selection based on IP pool availability
+                            selected_interface = node_interfaces[0]
+                            interface_name = selected_interface.interface_name
+                            interface_endpoint = selected_interface.endpoint or selected_node.endpoint
+                        else:
+                            # Fallback to legacy wg_interface field
+                            interface_name = selected_node.wg_interface
+                            interface_endpoint = selected_node.endpoint
+                        
+                        if not interface_name:
+                            # Rollback IP allocation
+                            IPAllocManager.deallocateIP(selected_node_id, public_key)
+                            return ResponseObject(False, "Node has no interface configured")
+                        
                         client = NodesManager.getNodeAgentClient(selected_node_id)
                         if not client:
                             # Rollback IP allocation
@@ -1148,12 +1178,12 @@ def API_addPeers(configName):
                         peer_data = {
                             "public_key": public_key,
                             "preshared_key": preshared_key if preshared_key else None,
-                            "allowed_ips": ','.join(allowed_ips),
-                            "persistent_keepalive": keep_alive if keep_alive > 0 else None
+                            "allowed_ips": allowed_ips,
+                            "persistent_keepalive": keep_alive if keep_alive > 0 else 0
                         }
                         
                         # Call agent to add peer
-                        success, response = client.add_peer(selected_node.wg_interface, peer_data)
+                        success, response = client.add_peer(interface_name, peer_data)
                         
                         if not success:
                             # Rollback IP allocation
@@ -1179,10 +1209,10 @@ def API_addPeers(configName):
                             "cumu_data": 0,
                             "mtu": mtu,
                             "keepalive": keep_alive,
-                            "remote_endpoint": selected_node.endpoint,
+                            "remote_endpoint": interface_endpoint or selected_node.endpoint,
                             "preshared_key": preshared_key,
                             "node_id": selected_node_id,
-                            "iface": selected_node.wg_interface
+                            "iface": interface_name
                         }
                         
                         with config.engine.begin() as conn:
