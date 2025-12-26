@@ -1,0 +1,37 @@
+{
+  "name": "wgdashboard",
+  "version": "4.3.1",
+  "description": "WireGuard Dashboard - A modern web interface for managing WireGuard VPN configurations",
+  "private": true,
+  "workspaces": [
+    "src/static/app",
+    "src/static/client"
+  ],
+  "scripts": {
+    "install:all": "npm install && npm install --workspace=src/static/app && npm install --workspace=src/static/client",
+    "build": "npm run build --workspace=src/static/app && npm run build --workspace=src/static/client",
+    "build:app": "npm run build --workspace=src/static/app",
+    "build:client": "npm run build --workspace=src/static/client",
+    "dev:app": "npm run dev --workspace=src/static/app",
+    "dev:client": "npm run dev --workspace=src/static/client",
+    "preview:app": "npm run preview --workspace=src/static/app",
+    "preview:client": "npm run preview --workspace=src/static/client"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gabzou364/WGDashboard.git"
+  },
+  "keywords": [
+    "wireguard",
+    "vpn",
+    "dashboard",
+    "network",
+    "management"
+  ],
+  "author": "WGDashboard Contributors",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
