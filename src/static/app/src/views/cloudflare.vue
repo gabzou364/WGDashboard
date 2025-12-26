@@ -17,7 +17,7 @@
 
       <!-- Configuration Status -->
       <div class="alert" :class="cloudflareConfigured ? 'alert-success' : 'alert-warning'" role="alert">
-        <i class="bi" :class="cloudflareConfigured ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'" class="me-2"></i>
+        <i class="bi me-2" :class="cloudflareConfigured ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'"></i>
         <span v-if="cloudflareConfigured">
           Cloudflare API is configured and ready
         </span>
