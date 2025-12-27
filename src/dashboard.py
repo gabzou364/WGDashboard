@@ -45,6 +45,7 @@ from modules.IPAllocationManager import IPAllocationManager
 from modules.NodeSelector import NodeSelector
 from modules.DriftDetector import DriftDetector
 from modules.ConfigNodesManager import ConfigNodesManager
+from modules.NodeInterfacesManager import NodeInterfacesManager
 from modules.EndpointGroupsManager import EndpointGroupsManager
 from modules.CloudflareDNSManager import CloudflareDNSManager
 from modules.PeerMigrationManager import PeerMigrationManager
@@ -268,6 +269,7 @@ with app.app_context():
     NodeSelector: NodeSelector = NodeSelector(NodesManager)
     DriftDetector: DriftDetector = DriftDetector(DashboardConfig)
     ConfigNodesManager: ConfigNodesManager = ConfigNodesManager(DashboardConfig)
+    NodeInterfacesManager: NodeInterfacesManager = NodeInterfacesManager(DashboardConfig)
     EndpointGroupsManager: EndpointGroupsManager = EndpointGroupsManager(DashboardConfig)
     CloudflareDNSManager: CloudflareDNSManager = CloudflareDNSManager()
     PeerMigrationManager: PeerMigrationManager = PeerMigrationManager(DashboardConfig, NodesManager, ConfigNodesManager)
@@ -1136,6 +1138,36 @@ def API_addPeers(configName):
                 if selected_node:
                     # Create peer via node agent
                     try:
+                        # Select appropriate interface for this node
+                        # Priority:
+                        # 1. Interface specified by user (if added to API in future)
+                        # 2. Interface with available IPs in its pool
+                        # 3. First enabled interface
+                        # 4. Fallback to legacy wg_interface field
+                        
+                        selected_interface = None
+                        interface_name = None
+                        interface_endpoint = None
+                        
+                        # Get enabled interfaces for this node
+                        node_interfaces = NodeInterfacesManager.getEnabledInterfacesByNodeId(selected_node_id)
+                        
+                        if node_interfaces:
+                            # For now, select the first enabled interface
+                            # TODO: Implement smarter selection based on IP pool availability
+                            selected_interface = node_interfaces[0]
+                            interface_name = selected_interface.interface_name
+                            interface_endpoint = selected_interface.endpoint or selected_node.endpoint
+                        else:
+                            # Fallback to legacy wg_interface field
+                            interface_name = selected_node.wg_interface
+                            interface_endpoint = selected_node.endpoint
+                        
+                        if not interface_name:
+                            # Rollback IP allocation
+                            IPAllocManager.deallocateIP(selected_node_id, public_key)
+                            return ResponseObject(False, "Node has no interface configured")
+                        
                         client = NodesManager.getNodeAgentClient(selected_node_id)
                         if not client:
                             # Rollback IP allocation
@@ -1146,12 +1178,12 @@ def API_addPeers(configName):
                         peer_data = {
                             "public_key": public_key,
                             "preshared_key": preshared_key if preshared_key else None,
-                            "allowed_ips": ','.join(allowed_ips),
-                            "persistent_keepalive": keep_alive if keep_alive > 0 else None
+                            "allowed_ips": allowed_ips,
+                            "persistent_keepalive": keep_alive if keep_alive > 0 else 0
                         }
                         
                         # Call agent to add peer
-                        success, response = client.add_peer(selected_node.wg_interface, peer_data)
+                        success, response = client.add_peer(interface_name, peer_data)
                         
                         if not success:
                             # Rollback IP allocation
@@ -1177,10 +1209,10 @@ def API_addPeers(configName):
                             "cumu_data": 0,
                             "mtu": mtu,
                             "keepalive": keep_alive,
-                            "remote_endpoint": selected_node.endpoint,
+                            "remote_endpoint": interface_endpoint or selected_node.endpoint,
                             "preshared_key": preshared_key,
                             "node_id": selected_node_id,
-                            "iface": selected_node.wg_interface
+                            "iface": interface_name
                         }
                         
                         with config.engine.begin() as conn:
@@ -1997,7 +2029,17 @@ def API_GetNodes():
     """Get all nodes"""
     try:
         nodes = NodesManager.getAllNodes()
-        return ResponseObject(data=[node.toJson() for node in nodes])
+        include_interfaces = request.args.get('include_interfaces', 'false').lower() == 'true'
+        
+        nodes_data = []
+        for node in nodes:
+            node_data = node.toJson()
+            if include_interfaces:
+                interfaces = NodeInterfacesManager.getInterfacesByNodeId(node.id)
+                node_data['interfaces'] = [iface.toJson() for iface in interfaces]
+            nodes_data.append(node_data)
+        
+        return ResponseObject(data=nodes_data)
     except Exception as e:
         app.logger.error(f"Error getting nodes: {e}")
         return ResponseObject(False, "Failed to get nodes")
@@ -2007,7 +2049,18 @@ def API_GetEnabledNodes():
     """Get only enabled nodes for peer creation UI"""
     try:
         nodes = NodesManager.getEnabledNodes()
-        return ResponseObject(data=[node.toJson() for node in nodes])
+        include_interfaces = request.args.get('include_interfaces', 'true').lower() == 'true'
+        
+        nodes_data = []
+        for node in nodes:
+            node_data = node.toJson()
+            if include_interfaces:
+                # For enabled nodes, include only enabled interfaces
+                interfaces = NodeInterfacesManager.getEnabledInterfacesByNodeId(node.id)
+                node_data['interfaces'] = [iface.toJson() for iface in interfaces]
+            nodes_data.append(node_data)
+        
+        return ResponseObject(data=nodes_data)
     except Exception as e:
         app.logger.error(f"Error getting enabled nodes: {e}")
         return ResponseObject(False, "Failed to get enabled nodes")
@@ -2018,7 +2071,11 @@ def API_GetNode(node_id):
     try:
         node = NodesManager.getNodeById(node_id)
         if node:
-            return ResponseObject(data=node.toJson())
+            node_data = node.toJson()
+            # Always include interfaces when getting a specific node
+            interfaces = NodeInterfacesManager.getInterfacesByNodeId(node.id)
+            node_data['interfaces'] = [iface.toJson() for iface in interfaces]
+            return ResponseObject(data=node_data)
         return ResponseObject(False, "Node not found")
     except Exception as e:
         app.logger.error(f"Error getting node: {e}")
@@ -2026,18 +2083,25 @@ def API_GetNode(node_id):
 
 @app.post(f'{APP_PREFIX}/api/nodes')
 def API_CreateNode():
-    """Create a new node"""
+    """Create a new node
+    
+    Supports two modes:
+    1. Legacy mode: Provide wg_interface, endpoint, ip_pool_cidr (backward compatible)
+    2. New mode: Provide interfaces array with multiple interface definitions
+    
+    At least one interface must be defined through either approach.
+    """
     try:
         data = request.get_json()
-        required_fields = ['name', 'agent_url', 'wg_interface']
+        required_fields = ['name', 'agent_url']
         
         if not all(field in data for field in required_fields):
-            return ResponseObject(False, "Missing required fields: name, agent_url, wg_interface")
+            return ResponseObject(False, "Missing required fields: name, agent_url")
         
         success, result = NodesManager.createNode(
             name=data['name'],
             agent_url=data['agent_url'],
-            wg_interface=data['wg_interface'],
+            wg_interface=data.get('wg_interface', ''),  # Keep for backward compatibility
             endpoint=data.get('endpoint', ''),
             ip_pool_cidr=data.get('ip_pool_cidr', ''),
             secret=data.get('secret'),
@@ -2047,9 +2111,55 @@ def API_CreateNode():
             enabled=data.get('enabled', True)
         )
         
-        if success:
-            return ResponseObject(True, "Node created successfully", data=result.toJson())
-        return ResponseObject(False, result)
+        if not success:
+            return ResponseObject(False, result)
+        
+        node = result
+        
+        # Create interfaces if provided
+        # Priority 1: interfaces array (new approach)
+        if 'interfaces' in data and isinstance(data['interfaces'], list):
+            for iface_data in data['interfaces']:
+                if 'interface_name' not in iface_data:
+                    continue
+                    
+                NodeInterfacesManager.createInterface(
+                    node_id=node.id,
+                    interface_name=iface_data['interface_name'],
+                    endpoint=iface_data.get('endpoint'),
+                    ip_pool_cidr=iface_data.get('ip_pool_cidr'),
+                    listen_port=iface_data.get('listen_port'),
+                    address=iface_data.get('address'),
+                    private_key_encrypted=iface_data.get('private_key_encrypted'),
+                    post_up=iface_data.get('post_up'),
+                    pre_down=iface_data.get('pre_down'),
+                    mtu=iface_data.get('mtu'),
+                    dns=iface_data.get('dns'),
+                    table=iface_data.get('table'),
+                    enabled=iface_data.get('enabled', True)
+                )
+        # Priority 2: Legacy wg_interface field (backward compatibility)
+        elif data.get('wg_interface'):
+            NodeInterfacesManager.createInterface(
+                node_id=node.id,
+                interface_name=data['wg_interface'],
+                endpoint=data.get('endpoint'),
+                ip_pool_cidr=data.get('ip_pool_cidr'),
+                listen_port=data.get('override_listen_port'),
+                private_key_encrypted=data.get('private_key_encrypted'),
+                post_up=data.get('post_up'),
+                pre_down=data.get('pre_down'),
+                mtu=data.get('override_mtu'),
+                dns=data.get('override_dns'),
+                enabled=True
+            )
+        
+        # Get created interfaces to include in response
+        interfaces = NodeInterfacesManager.getInterfacesByNodeId(node.id)
+        response_data = node.toJson()
+        response_data['interfaces'] = [iface.toJson() for iface in interfaces]
+        
+        return ResponseObject(True, "Node created successfully", data=response_data)
     except Exception as e:
         app.logger.error(f"Error creating node: {e}")
         return ResponseObject(False, "Failed to create node")
@@ -2103,6 +2213,119 @@ def API_DeleteNode(node_id):
     except Exception as e:
         app.logger.error(f"Error deleting node: {e}")
         return ResponseObject(False, "Failed to delete node")
+
+
+# Node Interface Management API Endpoints
+
+@app.get(f'{APP_PREFIX}/api/nodes/<node_id>/interfaces')
+def API_GetNodeInterfaces(node_id):
+    """Get all interfaces for a node"""
+    try:
+        interfaces = NodeInterfacesManager.getInterfacesByNodeId(node_id)
+        return ResponseObject(True, "Interfaces retrieved successfully", 
+                            data=[iface.toJson() for iface in interfaces])
+    except Exception as e:
+        app.logger.error(f"Error getting node interfaces: {e}")
+        return ResponseObject(False, "Failed to get node interfaces")
+
+@app.post(f'{APP_PREFIX}/api/nodes/<node_id>/interfaces')
+def API_CreateNodeInterface(node_id):
+    """Create a new interface for a node"""
+    try:
+        data = request.get_json()
+        required_fields = ['interface_name']
+        
+        if not all(field in data for field in required_fields):
+            return ResponseObject(False, "Missing required field: interface_name")
+        
+        success, result = NodeInterfacesManager.createInterface(
+            node_id=node_id,
+            interface_name=data['interface_name'],
+            endpoint=data.get('endpoint'),
+            ip_pool_cidr=data.get('ip_pool_cidr'),
+            listen_port=data.get('listen_port'),
+            address=data.get('address'),
+            private_key_encrypted=data.get('private_key_encrypted'),
+            post_up=data.get('post_up'),
+            pre_down=data.get('pre_down'),
+            mtu=data.get('mtu'),
+            dns=data.get('dns'),
+            table=data.get('table'),
+            enabled=data.get('enabled', True)
+        )
+        
+        if success:
+            return ResponseObject(True, "Interface created successfully", data=result.toJson())
+        return ResponseObject(False, result)
+    except Exception as e:
+        app.logger.error(f"Error creating node interface: {e}")
+        return ResponseObject(False, "Failed to create node interface")
+
+@app.get(f'{APP_PREFIX}/api/nodes/<node_id>/interfaces/<interface_id>')
+def API_GetNodeInterface(node_id, interface_id):
+    """Get a specific interface"""
+    try:
+        interface = NodeInterfacesManager.getInterfaceById(interface_id)
+        if interface and interface.node_id == node_id:
+            return ResponseObject(True, "Interface retrieved successfully", data=interface.toJson())
+        return ResponseObject(False, "Interface not found")
+    except Exception as e:
+        app.logger.error(f"Error getting node interface: {e}")
+        return ResponseObject(False, "Failed to get node interface")
+
+@app.put(f'{APP_PREFIX}/api/nodes/<node_id>/interfaces/<interface_id>')
+def API_UpdateNodeInterface(node_id, interface_id):
+    """Update an interface"""
+    try:
+        # Verify the interface belongs to the node
+        interface = NodeInterfacesManager.getInterfaceById(interface_id)
+        if not interface or interface.node_id != node_id:
+            return ResponseObject(False, "Interface not found")
+        
+        data = request.get_json()
+        success, result = NodeInterfacesManager.updateInterface(interface_id, data)
+        
+        if success:
+            return ResponseObject(True, "Interface updated successfully", data=result.toJson())
+        return ResponseObject(False, result)
+    except Exception as e:
+        app.logger.error(f"Error updating node interface: {e}")
+        return ResponseObject(False, "Failed to update node interface")
+
+@app.delete(f'{APP_PREFIX}/api/nodes/<node_id>/interfaces/<interface_id>')
+def API_DeleteNodeInterface(node_id, interface_id):
+    """Delete an interface"""
+    try:
+        # Verify the interface belongs to the node
+        interface = NodeInterfacesManager.getInterfaceById(interface_id)
+        if not interface or interface.node_id != node_id:
+            return ResponseObject(False, "Interface not found")
+        
+        success, message = NodeInterfacesManager.deleteInterface(interface_id)
+        return ResponseObject(success, message)
+    except Exception as e:
+        app.logger.error(f"Error deleting node interface: {e}")
+        return ResponseObject(False, "Failed to delete node interface")
+
+@app.post(f'{APP_PREFIX}/api/nodes/<node_id>/interfaces/<interface_id>/toggle')
+def API_ToggleNodeInterface(node_id, interface_id):
+    """Toggle interface enabled status"""
+    try:
+        # Verify the interface belongs to the node
+        interface = NodeInterfacesManager.getInterfaceById(interface_id)
+        if not interface or interface.node_id != node_id:
+            return ResponseObject(False, "Interface not found")
+        
+        data = request.get_json()
+        enabled = data.get('enabled', not interface.enabled)
+        success, result = NodeInterfacesManager.toggleInterfaceEnabled(interface_id, enabled)
+        
+        if success:
+            return ResponseObject(True, "Interface toggled successfully", data=result.toJson())
+        return ResponseObject(False, result)
+    except Exception as e:
+        app.logger.error(f"Error toggling node interface: {e}")
+        return ResponseObject(False, "Failed to toggle node interface")
 
 
 @app.get(f'{APP_PREFIX}/api/drift/nodes/<node_id>')

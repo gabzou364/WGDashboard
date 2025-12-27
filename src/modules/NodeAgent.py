@@ -135,7 +135,7 @@ class AgentClient:
         Returns:
             Tuple of (success: bool, dump_data or error_message)
         """
-        return self._make_request('GET', f'/wg/{iface}/dump')
+        return self._make_request('GET', f'/v1/wg/{iface}/dump')
 
     def add_peer(self, iface: str, peer_data: Dict[str, Any]) -> Tuple[bool, Any]:
         """
@@ -148,7 +148,7 @@ class AgentClient:
         Returns:
             Tuple of (success: bool, response_data or error_message)
         """
-        return self._make_request('POST', f'/wg/{iface}/peers', peer_data)
+        return self._make_request('POST', f'/v1/wg/{iface}/peers', peer_data)
 
     def update_peer(self, iface: str, public_key: str, peer_data: Dict[str, Any]) -> Tuple[bool, Any]:
         """
@@ -162,7 +162,7 @@ class AgentClient:
         Returns:
             Tuple of (success: bool, response_data or error_message)
         """
-        return self._make_request('PUT', f'/wg/{iface}/peers/{public_key}', peer_data)
+        return self._make_request('PUT', f'/v1/wg/{iface}/peers/{public_key}', peer_data)
 
     def delete_peer(self, iface: str, public_key: str) -> Tuple[bool, Any]:
         """
@@ -175,7 +175,7 @@ class AgentClient:
         Returns:
             Tuple of (success: bool, response_data or error_message)
         """
-        return self._make_request('DELETE', f'/wg/{iface}/peers/{public_key}')
+        return self._make_request('DELETE', f'/v1/wg/{iface}/peers/{public_key}')
     
     def syncconf(self, iface: str, config_base64: str) -> Tuple[bool, Any]:
         """

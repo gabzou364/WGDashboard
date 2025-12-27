@@ -107,6 +107,7 @@ class DashboardConfig:
         self.__createConfigNodesTable()
         self.__createEndpointGroupsTable()
         self.__createAuditLogTable()
+        self.__createNodeInterfacesTable()
         self.DashboardAPIKeys = self.__getAPIKeys()
         self.APIAccessed = False
         self.SetConfig("Server", "version", DashboardConfig.DashboardVersion)
@@ -268,6 +269,34 @@ class DashboardConfig:
                                       db.Column('details', db.Text, nullable=True),
                                       db.Column('user', db.String(255), nullable=True)
                                       )
+        self.dbMetadata.create_all(self.engine)
+    
+    def __createNodeInterfacesTable(self):
+        """Create node interfaces table for managing multiple interfaces per node"""
+        self.nodeInterfacesTable = db.Table('NodeInterfaces', self.dbMetadata,
+                                           db.Column('id', db.String(255), nullable=False, primary_key=True),
+                                           db.Column('node_id', db.String(255), nullable=False),
+                                           db.Column('interface_name', db.String(50), nullable=False),
+                                           db.Column('endpoint', db.String(255), nullable=True),
+                                           db.Column('ip_pool_cidr', db.String(50), nullable=True),
+                                           db.Column('listen_port', db.Integer, nullable=True),
+                                           db.Column('address', db.String(255), nullable=True),
+                                           db.Column('private_key_encrypted', db.Text, nullable=True),
+                                           db.Column('post_up', db.Text, nullable=True),
+                                           db.Column('pre_down', db.Text, nullable=True),
+                                           db.Column('mtu', db.Integer, nullable=True),
+                                           db.Column('dns', db.String(255), nullable=True),
+                                           db.Column('table', db.String(50), nullable=True),
+                                           db.Column('enabled', db.Boolean, server_default='1'),
+                                           db.Column('created_at',
+                                                    (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                    server_default=db.func.now()),
+                                           db.Column('updated_at',
+                                                    (db.DATETIME if self.GetConfig('Database', 'type')[1] == 'sqlite' else db.TIMESTAMP),
+                                                    server_default=db.func.now(),
+                                                    onupdate=db.func.now()),
+                                           db.UniqueConstraint('node_id', 'interface_name', name='uq_node_interface')
+                                           )
         self.dbMetadata.create_all(self.engine)
     
     def __getAPIKeys(self) -> list[DashboardAPIKey]:
